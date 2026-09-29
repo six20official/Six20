@@ -1,0 +1,1 @@
+import {NextResponse} from 'next/server'; import {auth,publicUser} from '../../../lib/store'; export async function GET(req:Request){const u=auth(req);return u?NextResponse.json(publicUser(u)):NextResponse.json({error:'Unauthorized'},{status:401})}

@@ -1,0 +1,2 @@
+import {NextResponse} from 'next/server'; import {store,publicUser,token} from '../../../../lib/store';
+export async function POST(req:Request){const b=await req.json();const email=String(b.email||'').trim().toLowerCase();const password=String(b.password||'');const u=store.users.find(x=>x.email===email&&x.password===password);if(!u)return NextResponse.json({error:'Invalid email or password.'},{status:401});const t=token();store.tokens.set(t,u.id);return NextResponse.json({token:t,user:publicUser(u)})}

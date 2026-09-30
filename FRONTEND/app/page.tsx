@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -237,11 +237,26 @@ export default function Home() {
 
         <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#EAE2D9] bg-[#FFF9F2]/95 px-2 py-2 backdrop-blur-xl lg:hidden">
           <div className="mx-auto flex max-w-lg items-center justify-around">
-            {[[HomeIcon,"Home","/"],[Compass,"Discover","/discover"],[Radio,"Live","/live"],[Gamepad2,"Play","/games"],[MessageCircle,"Chat","/messages"]].map(([Icon,label,href]) => (
-              <a key={label as string} href={href as string} className="flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold text-[#77728A]">
-                <Icon size={19} />{label}
-              </a>
-            ))}
+            {[
+              { id: "home", label: "Home", icon: HomeIcon, href: "/" },
+              { id: "discover", label: "Discover", icon: Compass, href: "/discover" },
+              { id: "live", label: "Live", icon: Radio, href: "/live" },
+              { id: "play", label: "Play", icon: Gamepad2, href: "/games" },
+              { id: "chat", label: "Chat", icon: MessageCircle, href: "/messages" },
+            ].map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <a
+                  key={item.id}
+                  href={item.href}
+                  className="flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold text-[#77728A]"
+                >
+                  <Icon size={19} />
+                  <span>{item.label}</span>
+                </a>
+              );
+            })}
           </div>
         </nav>
       </main>

@@ -1,1089 +1,272 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Bell,
-  ChevronRight,
-  Gamepad2,
-  Heart,
-  Home,
-  MessageCircle,
-  Play,
-  Search,
-  ShoppingBag,
-  Sparkles,
-  Trophy,
-  User,
-  Video,
-  Wallet,
-  Users,
-  Music,
-  CalendarDays,
-  Flame,
-  Radio,
-  Plus,
+  ArrowRight, Bell, ChevronRight, Compass, Gamepad2, Headphones,
+  Heart, Home as HomeIcon, MessageCircle, Music2, Play, Plus, Radio,
+  Search, ShoppingBag, Sparkles, Trophy, Users, Wallet, Zap
 } from "lucide-react";
 
-const discoverItems = [
-  {
-    id: "live",
-    title: "SIX20 Live",
-    description: "Watch creators live and join the conversation.",
-    icon: Radio,
-  },
-  {
-    id: "play",
-    title: "Play",
-    description: "Challenge friends with games, quizzes and battles.",
-    icon: Gamepad2,
-  },
-  {
-    id: "music",
-    title: "Music",
-    description: "Discover artists, sounds and entertainment.",
-    icon: Music,
-  },
-  {
-    id: "events",
-    title: "Events",
-    description: "Find events, parties and experiences.",
-    icon: CalendarDays,
-  },
-];
+type Post = {
+  id: string;
+  author?: { name?: string; username?: string; avatarUrl?: string };
+  content?: string;
+  imageUrl?: string;
+  likes?: number;
+  comments?: number;
+};
 
-const liveCreators = [
-  {
-    id: "1",
-    name: "Ayo Creator",
-    viewers: "2.4K",
-    category: "Entertainment",
-  },
-  {
-    id: "2",
-    name: "Lagos Vibes",
-    viewers: "1.8K",
-    category: "Music",
-  },
-  {
-    id: "3",
-    name: "Naija Games",
-    viewers: "954",
-    category: "Gaming",
-  },
-];
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "";
 
-const trendingPosts = [
-  {
-    id: "1",
-    name: "SIX20 Entertainment",
-    text: "Welcome to SIX20 — where entertainment comes alive.",
-    likes: 1240,
-    comments: 86,
-  },
-  {
-    id: "2",
-    name: "Tunde Live",
-    text: "Tonight's live challenge starts at 8PM. Who is joining?",
-    likes: 892,
-    comments: 64,
-  },
-  {
-    id: "3",
-    name: "Lagos Food & Vibes",
-    text: "Good food, good music and good people. That's the vibe.",
-    likes: 631,
-    comments: 42,
-  },
-];
+async function getPosts(): Promise<Post[]> {
+  try {
+    const res = await fetch(`${API}/api/posts`, { credentials: "include", cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.posts)) return data.posts;
+    if (Array.isArray(data.data)) return data.data;
+  } catch {}
+  return [];
+}
 
-export default function HomePage() {
-  const [activeNav, setActiveNav] = useState("Home");
+const nav = [
+  ["discover", "Discover", Compass, "/discover"],
+  ["live", "LIVE", Radio, "/live"],
+  ["play", "Play", Gamepad2, "/games"],
+  ["chat", "Chat", MessageCircle, "/messages"],
+  ["market", "Market", ShoppingBag, "/marketplace"],
+  ["wallet", "Wallet", Wallet, "/wallet"],
+] as const;
+
+function Logo() {
+  return (
+    <a href="/" className="flex items-center gap-2.5">
+      <span className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-2xl bg-[#1B1734] shadow-lg">
+        <span className="absolute -right-2 -top-2 h-7 w-7 rounded-full bg-[#FF6B6B]" />
+        <span className="absolute -bottom-3 -left-2 h-7 w-7 rounded-full bg-[#FFB52E]" />
+        <b className="relative text-[13px] tracking-[-.08em] text-white">S20</b>
+      </span>
+      <b className="text-[22px] tracking-[-.07em] text-[#1B1734]">SIX<span className="text-[#6947F5]">20</span></b>
+    </a>
+  );
+}
+
+function SectionTitle({ eyebrow, title, href }: { eyebrow: string; title: string; href?: string }) {
+  return (
+    <div className="mb-5 flex items-end justify-between gap-4">
+      <div>
+        <p className="mb-1 text-[11px] font-extrabold uppercase tracking-[.18em] text-[#6947F5]">{eyebrow}</p>
+        <h2 className="text-2xl font-black tracking-[-.04em] text-[#1B1734] md:text-3xl">{title}</h2>
+      </div>
+      {href && <a href={href} className="hidden items-center gap-1 text-sm font-bold text-[#6947F5] sm:flex">Explore <ArrowRight size={16} /></a>}
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="rounded-[28px] border border-[#EDE6FF] bg-white p-8 text-center shadow-sm">
+      <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-[#F0ECFF] text-[#6947F5]"><Users size={25} /></div>
+      <h3 className="font-black text-[#1B1734]">Your community is waiting.</h3>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#77728A]">
+        Connect the SIX20 backend and real posts will appear here. No fake activity is shown.
+      </p>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [intro, setIntro] = useState(true);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [likedPosts, setLikedPosts] = useState<string[]>([]);
 
-  const toggleLike = (id: string) => {
-    setLikedPosts((current) =>
-      current.includes(id)
-        ? current.filter((item) => item !== id)
-        : [...current, id]
-    );
-  };
+  useEffect(() => {
+    const seen = sessionStorage.getItem("six20-intro-seen");
+    if (seen) setIntro(false);
+    else {
+      const timer = window.setTimeout(() => {
+        sessionStorage.setItem("six20-intro-seen", "1");
+        setIntro(false);
+      }, 2700);
+      return () => window.clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    getPosts().then((items) => {
+      if (active) {
+        setPosts(items);
+        setLoading(false);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return posts;
+    return posts.filter(p => `${p.content || ""} ${p.author?.name || ""} ${p.author?.username || ""}`.toLowerCase().includes(q));
+  }, [posts, search]);
+
+  const experiences = [
+    [Radio, "SIX20 LIVE", "Watch live creators and join the conversation.", "/live", "from-[#FFF0EE]"],
+    [Gamepad2, "SIX20 PLAY", "Games, challenges and social competition.", "/games", "from-[#F0ECFF]"],
+    [Headphones, "SIX20 MUSIC", "Discover sounds, artists and moments.", "#music", "from-[#E8F9F6]"],
+    [CalendarIcon, "SIX20 EVENTS", "Find experiences and things happening around you.", "#events", "from-[#FFF5D9]"],
+    [ShoppingBag, "SIX20 MARKET", "Products, creators and commerce.", "/marketplace", "from-[#EAF4FF]"],
+    [Zap, "SIX20 REWARDS", "Earn through participation, creativity and activity.", "/wallet", "from-[#FFF0E5]"],
+  ] as const;
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        background:
-          "radial-gradient(circle at top right, rgba(124,58,237,.18), transparent 30%), #08080b",
-        color: "#fff",
-        fontFamily:
-          "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
-      }}
-    >
-      {/* HEADER */}
-      <header
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 50,
-          borderBottom: "1px solid rgba(255,255,255,.08)",
-          background: "rgba(8,8,11,.9)",
-          backdropFilter: "blur(18px)",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 1400,
-            margin: "0 auto",
-            padding: "14px 20px",
-            display: "flex",
-            alignItems: "center",
-            gap: 18,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 27,
-              fontWeight: 900,
-              letterSpacing: "-1.5px",
-              background:
-                "linear-gradient(90deg, #fff, #c084fc, #f472b6)",
-              WebkitBackgroundClip: "text",
-              color: "transparent",
-              whiteSpace: "nowrap",
-            }}
-          >
-            SIX20
+    <>
+      {intro && (
+        <div className="six20-intro fixed inset-0 z-[100] grid place-items-center overflow-hidden bg-[#FFF9F2]">
+          <div className="intro-orb one" /><div className="intro-orb two" />
+          <div className="relative text-center">
+            <div className="mx-auto mb-7 grid h-28 w-28 place-items-center rounded-[34px] bg-[#1B1734] shadow-[0_25px_70px_rgba(105,71,245,.25)]">
+              <b className="text-3xl tracking-[-.1em] text-white">SIX<span className="text-[#FF7A66]">20</span></b>
+            </div>
+            <h1 className="text-5xl font-black tracking-[-.08em] text-[#1B1734]">SIX<span className="text-[#6947F5]">20</span></h1>
+            <p className="mt-3 text-xs font-extrabold uppercase tracking-[.28em] text-[#77728A]">Where Entertainment Comes Alive</p>
           </div>
-
-          <div
-            style={{
-              flex: 1,
-              maxWidth: 520,
-              position: "relative",
-            }}
-          >
-            <Search
-              size={18}
-              style={{
-                position: "absolute",
-                left: 14,
-                top: 13,
-                opacity: 0.55,
-              }}
-            />
-
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search SIX20..."
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "12px 16px 12px 42px",
-                borderRadius: 14,
-                border: "1px solid rgba(255,255,255,.1)",
-                background: "rgba(255,255,255,.06)",
-                color: "#fff",
-                outline: "none",
-              }}
-            />
-          </div>
-
-          <button
-            type="button"
-            aria-label="Notifications"
-            style={iconButton}
-            onClick={() => setActiveNav("Notifications")}
-          >
-            <Bell size={19} />
-          </button>
-
-          <button
-            type="button"
-            aria-label="Messages"
-            style={iconButton}
-            onClick={() => setActiveNav("Messages")}
-          >
-            <MessageCircle size={19} />
-          </button>
-
-          <button
-            type="button"
-            style={{
-              ...primaryButton,
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-            }}
-          >
-            <Plus size={17} />
-            Create
-          </button>
         </div>
-      </header>
+      )}
 
-      {/* CONTENT */}
-      <div
-        style={{
-          maxWidth: 1400,
-          margin: "0 auto",
-          padding: "28px 20px 60px",
-          display: "grid",
-          gridTemplateColumns: "230px minmax(0,1fr) 290px",
-          gap: 22,
-        }}
-      >
-        {/* SIDEBAR */}
-        <aside>
-          <nav
-            style={{
-              position: "sticky",
-              top: 90,
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <NavButton
-              icon={<Home size={19} />}
-              label="Home"
-              active={activeNav === "Home"}
-              onClick={() => setActiveNav("Home")}
-            />
-
-            <NavButton
-              icon={<Sparkles size={19} />}
-              label="Discover"
-              active={activeNav === "Discover"}
-              onClick={() => setActiveNav("Discover")}
-            />
-
-            <NavButton
-              icon={<Radio size={19} />}
-              label="LIVE"
-              active={activeNav === "LIVE"}
-              onClick={() => setActiveNav("LIVE")}
-            />
-
-            <NavButton
-              icon={<MessageCircle size={19} />}
-              label="Messages"
-              active={activeNav === "Messages"}
-              onClick={() => setActiveNav("Messages")}
-            />
-
-            <NavButton
-              icon={<Gamepad2 size={19} />}
-              label="Play"
-              active={activeNav === "Play"}
-              onClick={() => setActiveNav("Play")}
-            />
-
-            <NavButton
-              icon={<ShoppingBag size={19} />}
-              label="Market"
-              active={activeNav === "Market"}
-              onClick={() => setActiveNav("Market")}
-            />
-
-            <NavButton
-              icon={<Wallet size={19} />}
-              label="Wallet"
-              active={activeNav === "Wallet"}
-              onClick={() => setActiveNav("Wallet")}
-            />
-
-            <NavButton
-              icon={<User size={19} />}
-              label="Profile"
-              active={activeNav === "Profile"}
-              onClick={() => setActiveNav("Profile")}
-            />
-          </nav>
-        </aside>
-
-        {/* MAIN */}
-        <section>
-          {/* HERO */}
-          <div
-            style={{
-              borderRadius: 26,
-              padding: "34px",
-              marginBottom: 22,
-              background:
-                "linear-gradient(135deg, rgba(124,58,237,.85), rgba(236,72,153,.65), rgba(249,115,22,.65))",
-              boxShadow: "0 20px 60px rgba(0,0,0,.3)",
-              position: "relative",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                width: 260,
-                height: 260,
-                borderRadius: "50%",
-                right: -80,
-                top: -100,
-                background: "rgba(255,255,255,.12)",
-              }}
-            />
-
-            <div style={{ position: "relative", zIndex: 1 }}>
-              <div
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "7px 12px",
-                  borderRadius: 999,
-                  background: "rgba(0,0,0,.25)",
-                  fontSize: 12,
-                  fontWeight: 800,
-                  marginBottom: 15,
-                }}
-              >
-                <Sparkles size={14} />
-                THE NEW SIX20
-              </div>
-
-              <h1
-                style={{
-                  margin: 0,
-                  fontSize: "clamp(34px, 5vw, 62px)",
-                  lineHeight: 0.98,
-                  letterSpacing: "-3px",
-                  maxWidth: 720,
-                }}
-              >
-                Where
-                <br />
-                Entertainment
-                <br />
-                Comes Alive.
-              </h1>
-
-              <p
-                style={{
-                  maxWidth: 620,
-                  margin: "18px 0 22px",
-                  fontSize: 16,
-                  lineHeight: 1.6,
-                  opacity: 0.9,
-                }}
-              >
-                Watch. Chat. Play. Discover. Connect with creators,
-                communities, music, games and experiences from Africa and
-                around the world.
-              </p>
-
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 10,
-                }}
-              >
-                <button
-                  type="button"
-                  style={{
-                    ...whiteButton,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                  }}
-                >
-                  <Play size={17} fill="currentColor" />
-                  Explore SIX20
-                </button>
-
-                <button
-                  type="button"
-                  style={{
-                    ...darkButton,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                  }}
-                >
-                  <Video size={17} />
-                  Go Live
-                </button>
-              </div>
+      <main className="min-h-screen bg-[#FFF9F2] text-[#1B1734]">
+        <header className="sticky top-0 z-40 border-b border-[#EEE7DE] bg-[#FFF9F2]/90 backdrop-blur-xl">
+          <div className="mx-auto flex h-[76px] max-w-[1440px] items-center gap-6 px-4 md:px-8">
+            <Logo />
+            <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex">
+              {nav.map(([id, label, Icon, href]) => (
+                <a key={id} href={href} className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold text-[#625D70] transition hover:bg-white hover:text-[#6947F5]">
+                  <Icon size={17} />{label}
+                </a>
+              ))}
+            </nav>
+            <div className="ml-auto flex items-center gap-2">
+              <label className="hidden h-11 w-56 items-center gap-2 rounded-2xl border border-[#EAE2D9] bg-white px-3 md:flex">
+                <Search size={17} className="text-[#9690A3]" />
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SIX20" className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-[#AAA4B0]" />
+              </label>
+              <a href="/notifications" className="grid h-11 w-11 place-items-center rounded-2xl border border-[#EAE2D9] bg-white text-[#625D70]"><Bell size={19} /></a>
+              <a href="/profile" className="grid h-11 w-11 place-items-center rounded-2xl bg-[#1B1734] text-sm font-black text-white">S</a>
             </div>
           </div>
+        </header>
 
-          {/* DISCOVER */}
-          <SectionHeader
-            title="Explore SIX20"
-            icon={<Sparkles size={19} />}
-          />
+        <div className="mx-auto max-w-[1440px] px-4 pb-28 pt-6 md:px-8 md:pb-12">
+          <section className="relative overflow-hidden rounded-[36px] bg-[#1B1734] px-6 py-8 text-white shadow-[0_30px_80px_rgba(39,28,72,.15)] md:px-10 md:py-12">
+            <div className="hero-a" /><div className="hero-b" />
+            <div className="relative grid items-center gap-10 lg:grid-cols-[1.1fr_.9fr]">
+              <div>
+                <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3.5 py-2 text-[11px] font-extrabold uppercase tracking-[.16em]"><Sparkles size={14} className="text-[#FFB52E]" />Africa&apos;s entertainment universe</div>
+                <h1 className="max-w-3xl text-4xl font-black leading-[.98] tracking-[-.06em] md:text-6xl lg:text-7xl">
+                  Your world.<span className="block text-[#FFB52E]">Your vibe.</span><span className="block">Live on SIX20.</span>
+                </h1>
+                <p className="mt-5 max-w-2xl text-sm leading-7 text-white/65 md:text-base">Discover people, live moments, games, music, events and opportunities in one entertainment community.</p>
+                <div className="mt-7 flex flex-wrap gap-3">
+                  <a href="/live" className="inline-flex items-center gap-2 rounded-2xl bg-[#FF7A66] px-5 py-3.5 text-sm font-black text-white"><Play size={17} fill="currentColor" />Explore LIVE</a>
+                  <a href="/discover" className="inline-flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-3.5 text-sm font-black text-white ring-1 ring-white/10">Discover SIX20 <ArrowRight size={17} /></a>
+                </div>
+              </div>
+              <div className="relative mx-auto hidden h-[300px] w-full max-w-[470px] lg:block">
+                <div className="absolute inset-10 rounded-full border border-white/10" /><div className="absolute inset-16 rounded-full border border-white/10" />
+                <div className="absolute left-1/2 top-1/2 grid h-36 w-36 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-[42px] bg-white text-3xl font-black tracking-[-.08em] text-[#1B1734] shadow-2xl">SIX<span className="text-[#6947F5]">20</span></div>
+                <div className="chip c1"><Radio size={15} />LIVE</div><div className="chip c2"><Gamepad2 size={15} />PLAY</div><div className="chip c3"><Music2 size={15} />MUSIC</div><div className="chip c4"><Trophy size={15} />REWARDS</div>
+              </div>
+            </div>
+          </section>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: 13,
-              marginBottom: 30,
-            }}
-          >
-            {discoverItems.map((item) => {
-              const Icon = item.icon;
-
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setActiveNav(item.title)}
-                  style={{
-                    textAlign: "left",
-                    border: "1px solid rgba(255,255,255,.08)",
-                    background: "rgba(255,255,255,.045)",
-                    borderRadius: 20,
-                    padding: 18,
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 42,
-                      height: 42,
-                      borderRadius: 13,
-                      display: "grid",
-                      placeItems: "center",
-                      background:
-                        "linear-gradient(135deg, rgba(124,58,237,.35), rgba(236,72,153,.25))",
-                      marginBottom: 15,
-                    }}
-                  >
-                    <Icon size={20} />
+          <section className="mt-10">
+            <SectionTitle eyebrow="Explore" title="Everything in one universe." />
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {experiences.map(([Icon, title, text, href, gradient]) => (
+                <a key={title} href={href} className={`group rounded-[28px] border border-[#EEE7DE] bg-gradient-to-br ${gradient} via-white to-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-lg`}>
+                  <div className="flex items-start justify-between">
+                    <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-[#6947F5] shadow-sm"><Icon size={22} /></div>
+                    <ChevronRight size={19} className="text-[#A49EAC] transition group-hover:translate-x-1 group-hover:text-[#6947F5]" />
                   </div>
+                  <h3 className="mt-6 font-black">{title}</h3>
+                  <p className="mt-1 text-sm leading-6 text-[#77728A]">{text}</p>
+                </a>
+              ))}
+            </div>
+          </section>
 
-                  <div
-                    style={{
-                      fontWeight: 800,
-                      marginBottom: 6,
-                    }}
-                  >
-                    {item.title}
-                  </div>
-
-                  <div
-                    style={{
-                      fontSize: 12,
-                      lineHeight: 1.5,
-                      opacity: 0.58,
-                    }}
-                  >
-                    {item.description}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* FEED */}
-          <SectionHeader
-            title="Trending on SIX20"
-            icon={<Flame size={19} />}
-          />
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}
-          >
-            {trendingPosts
-              .filter((post) => {
-                if (!search.trim()) return true;
-
-                const query = search.toLowerCase();
-
-                return (
-                  post.name.toLowerCase().includes(query) ||
-                  post.text.toLowerCase().includes(query)
-                );
-              })
-              .map((post) => {
-                const liked = likedPosts.includes(post.id);
-
-                return (
-                  <article
-                    key={post.id}
-                    style={{
-                      borderRadius: 21,
-                      border: "1px solid rgba(255,255,255,.08)",
-                      background: "rgba(255,255,255,.04)",
-                      padding: 20,
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                      }}
-                    >
-                      <div style={avatar}>
-                        {post.name.charAt(0)}
+          <section className="mt-12">
+            <SectionTitle eyebrow="Community" title="What&apos;s happening" href="/discover" />
+            {loading ? (
+              <div className="grid gap-4 md:grid-cols-2"><div className="h-48 animate-pulse rounded-[28px] bg-[#F0EAE2]" /><div className="h-48 animate-pulse rounded-[28px] bg-[#F0EAE2]" /></div>
+            ) : filtered.length ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {filtered.slice(0, 6).map(post => (
+                  <article key={post.id} className="overflow-hidden rounded-[28px] border border-[#EEE7DE] bg-white shadow-sm">
+                    {post.imageUrl && <img src={post.imageUrl} alt="" className="h-56 w-full object-cover" />}
+                    <div className="p-5">
+                      <div className="flex items-center gap-3">
+                        {post.author?.avatarUrl ? <img src={post.author.avatarUrl} alt="" className="h-10 w-10 rounded-full object-cover" /> : <div className="grid h-10 w-10 place-items-center rounded-full bg-[#F0ECFF] text-sm font-black text-[#6947F5]">{(post.author?.name || "S").slice(0,1).toUpperCase()}</div>}
+                        <div><p className="text-sm font-black">{post.author?.name || "SIX20 creator"}</p><p className="text-xs text-[#9892A2]">{post.author?.username || ""}</p></div>
                       </div>
-
-                      <div style={{ flex: 1 }}>
-                        <strong>{post.name}</strong>
-
-                        <div
-                          style={{
-                            fontSize: 12,
-                            opacity: 0.5,
-                            marginTop: 3,
-                          }}
-                        >
-                          Just now
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        style={moreButton}
-                        aria-label="More options"
-                      >
-                        •••
-                      </button>
-                    </div>
-
-                    <p
-                      style={{
-                        margin: "18px 0",
-                        lineHeight: 1.65,
-                        opacity: 0.85,
-                      }}
-                    >
-                      {post.text}
-                    </p>
-
-                    <div
-                      style={{
-                        height: 170,
-                        borderRadius: 16,
-                        background:
-                          "linear-gradient(135deg, rgba(124,58,237,.25), rgba(236,72,153,.2), rgba(249,115,22,.18))",
-                        display: "grid",
-                        placeItems: "center",
-                        marginBottom: 15,
-                      }}
-                    >
-                      <Play size={38} opacity={0.8} />
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => toggleLike(post.id)}
-                        style={{
-                          ...actionButton,
-                          color: liked ? "#f472b6" : "#fff",
-                        }}
-                      >
-                        <Heart
-                          size={18}
-                          fill={liked ? "currentColor" : "none"}
-                        />
-                        {post.likes + (liked ? 1 : 0)}
-                      </button>
-
-                      <button
-                        type="button"
-                        style={actionButton}
-                      >
-                        <MessageCircle size={18} />
-                        {post.comments}
-                      </button>
-
-                      <button
-                        type="button"
-                        style={{
-                          ...actionButton,
-                          marginLeft: "auto",
-                        }}
-                      >
-                        Share
-                      </button>
+                      {post.content && <p className="mt-4 text-sm leading-6 text-[#514C5D]">{post.content}</p>}
+                      <div className="mt-5 flex gap-5 text-xs font-bold text-[#8A8495]"><span className="inline-flex items-center gap-1"><Heart size={15} />{post.likes || 0}</span><span className="inline-flex items-center gap-1"><MessageCircle size={15} />{post.comments || 0}</span></div>
                     </div>
                   </article>
-                );
-              })}
-          </div>
-        </section>
-
-        {/* RIGHT SIDEBAR */}
-        <aside>
-          <div
-            style={{
-              position: "sticky",
-              top: 90,
-              display: "flex",
-              flexDirection: "column",
-              gap: 18,
-            }}
-          >
-            {/* PROFILE CARD */}
-            <div style={sideCard}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                }}
-              >
-                <div style={largeAvatar}>A</div>
-
-                <div>
-                  <strong>Ayo Creator</strong>
-
-                  <div
-                    style={{
-                      opacity: 0.5,
-                      fontSize: 12,
-                      marginTop: 3,
-                    }}
-                  >
-                    @ayocreator
-                  </div>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3,1fr)",
-                  gap: 8,
-                  marginTop: 20,
-                }}
-              >
-                <Stat value="128" label="Posts" />
-                <Stat value="4.8K" label="Followers" />
-                <Stat value="326" label="Following" />
-              </div>
-            </div>
-
-            {/* LIVE NOW */}
-            <div style={sideCard}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  marginBottom: 15,
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: "50%",
-                      background: "#ef4444",
-                      boxShadow: "0 0 10px #ef4444",
-                    }}
-                  />
-                  <strong>Live Now</strong>
-                </div>
-
-                <button
-                  type="button"
-                  style={smallLink}
-                  onClick={() => setActiveNav("LIVE")}
-                >
-                  See all
-                </button>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 13,
-                }}
-              >
-                {liveCreators.map((creator) => (
-                  <div
-                    key={creator.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                    }}
-                  >
-                    <div
-                      style={{
-                        ...avatar,
-                        border: "2px solid #ec4899",
-                      }}
-                    >
-                      {creator.name.charAt(0)}
-                    </div>
-
-                    <div style={{ flex: 1 }}>
-                      <strong style={{ fontSize: 13 }}>
-                        {creator.name}
-                      </strong>
-
-                      <div
-                        style={{
-                          fontSize: 11,
-                          opacity: 0.5,
-                          marginTop: 3,
-                        }}
-                      >
-                        {creator.category}
-                      </div>
-                    </div>
-
-                    <span
-                      style={{
-                        fontSize: 11,
-                        opacity: 0.65,
-                      }}
-                    >
-                      {creator.viewers}
-                    </span>
-                  </div>
                 ))}
               </div>
+            ) : <EmptyState />}
+          </section>
+
+          <section className="mt-12 grid gap-5 lg:grid-cols-2">
+            <div className="rounded-[30px] bg-gradient-to-br from-[#E9E2FF] via-white to-[#F7F3FF] p-7 md:p-9">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#6947F5] text-white"><Trophy size={23} /></div>
+              <h2 className="mt-7 text-3xl font-black tracking-[-.05em]">Play. Participate. Earn.</h2>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-[#6E687C]">SIX20 is designed for participation, eligible rewards, affiliate activity and creator opportunities.</p>
+              <a href="/wallet" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-[#1B1734] px-5 py-3 text-sm font-black text-white">Explore rewards <ArrowRight size={17} /></a>
             </div>
-
-            {/* QUICK LINKS */}
-            <div style={sideCard}>
-              <strong>Quick access</strong>
-
-              <QuickLink
-                icon={<Trophy size={17} />}
-                title="Rewards"
-              />
-
-              <QuickLink
-                icon={<Users size={17} />}
-                title="Communities"
-              />
-
-              <QuickLink
-                icon={<ShoppingBag size={17} />}
-                title="Marketplace"
-              />
-
-              <QuickLink
-                icon={<Wallet size={17} />}
-                title="Wallet"
-              />
+            <div className="rounded-[30px] bg-gradient-to-br from-[#FFF0E8] via-white to-[#E9FBF8] p-7 md:p-9">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#FF7A66] text-white"><Plus size={23} /></div>
+              <h2 className="mt-7 text-3xl font-black tracking-[-.05em]">Your next audience is here.</h2>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-[#6E687C]">Build a creator identity, publish content, go live and turn your community into an entertainment experience.</p>
+              <a href="/profile" className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-[#FF7A66] px-5 py-3 text-sm font-black text-white">Open creator space <ArrowRight size={17} /></a>
             </div>
+          </section>
+        </div>
+
+        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[#EAE2D9] bg-[#FFF9F2]/95 px-2 py-2 backdrop-blur-xl lg:hidden">
+          <div className="mx-auto flex max-w-lg items-center justify-around">
+            {[[HomeIcon,"Home","/"],[Compass,"Discover","/discover"],[Radio,"Live","/live"],[Gamepad2,"Play","/games"],[MessageCircle,"Chat","/messages"]].map(([Icon,label,href]) => (
+              <a key={label as string} href={href as string} className="flex min-w-14 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[10px] font-bold text-[#77728A]">
+                <Icon size={19} />{label}
+              </a>
+            ))}
           </div>
-        </aside>
-      </div>
+        </nav>
+      </main>
 
-      {/* MOBILE NAV */}
-      <div
-        style={{
-          position: "fixed",
-          left: 10,
-          right: 10,
-          bottom: 10,
-          zIndex: 100,
-          padding: "10px 8px",
-          borderRadius: 20,
-          background: "rgba(15,15,20,.94)",
-          border: "1px solid rgba(255,255,255,.1)",
-          backdropFilter: "blur(20px)",
-          display: "none",
-          justifyContent: "space-around",
-        }}
-      >
-        <MobileNav icon={<Home size={19} />} label="Home" />
-        <MobileNav icon={<Search size={19} />} label="Discover" />
-        <MobileNav icon={<Plus size={23} />} label="Create" />
-        <MobileNav icon={<Radio size={19} />} label="Live" />
-        <MobileNav icon={<User size={19} />} label="Profile" />
-      </div>
-    </main>
+      <style jsx global>{`
+        html { scroll-behavior: smooth; }
+        body { margin: 0; background: #fff9f2; }
+        .six20-intro { animation: introOut .7s ease 2.05s forwards; }
+        .intro-orb { position:absolute; border-radius:999px; filter:blur(5px); opacity:.75; animation:orbFloat 5s ease-in-out infinite; }
+        .intro-orb.one { width:280px;height:280px;left:12%;top:15%;background:#ffb52e; }
+        .intro-orb.two { width:330px;height:330px;right:8%;bottom:5%;background:#b9a8ff;animation-delay:-2s; }
+        .hero-a,.hero-b { position:absolute;border-radius:999px;pointer-events:none;filter:blur(2px); }
+        .hero-a { width:300px;height:300px;right:-70px;top:-110px;background:radial-gradient(circle,rgba(255,122,102,.8),transparent 65%); }
+        .hero-b { width:350px;height:350px;right:22%;bottom:-250px;background:radial-gradient(circle,rgba(105,71,245,.7),transparent 65%); }
+        .chip { position:absolute;display:flex;align-items:center;gap:7px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.09);padding:9px 12px;border-radius:15px;font-size:11px;font-weight:900;backdrop-filter:blur(10px);animation:chipFloat 4s ease-in-out infinite; }
+        .c1{left:4%;top:18%;color:#ff9b8b}.c2{right:3%;top:26%;color:#b7a7ff;animation-delay:-.8s}.c3{left:9%;bottom:15%;color:#75e2d2;animation-delay:-1.6s}.c4{right:10%;bottom:10%;color:#ffd26a;animation-delay:-2.4s}
+        @keyframes introOut{to{opacity:0;visibility:hidden;pointer-events:none}}
+        @keyframes orbFloat{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(25px,-20px,0) scale(1.08)}}
+        @keyframes chipFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-10px)}}
+        @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.six20-intro{animation:introOut .2s ease forwards}.intro-orb,.chip{animation:none}}
+      `}</style>
+    </>
   );
 }
 
-/* COMPONENTS */
-
-function NavButton({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        width: "100%",
-        padding: "12px 14px",
-        borderRadius: 13,
-        border: "none",
-        background: active
-          ? "linear-gradient(90deg, rgba(124,58,237,.25), rgba(236,72,153,.12))"
-          : "transparent",
-        color: active ? "#fff" : "rgba(255,255,255,.62)",
-        cursor: "pointer",
-        textAlign: "left",
-        fontWeight: active ? 800 : 500,
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
+function CalendarIcon({ size = 22 }: { size?: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>;
 }
-
-function SectionHeader({
-  title,
-  icon,
-}: {
-  title: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        marginBottom: 14,
-      }}
-    >
-      {icon}
-
-      <h2
-        style={{
-          margin: 0,
-          fontSize: 19,
-          fontWeight: 850,
-        }}
-      >
-        {title}
-      </h2>
-
-      <ChevronRight size={17} opacity={0.45} />
-    </div>
-  );
-}
-
-function Stat({
-  value,
-  label,
-}: {
-  value: string;
-  label: string;
-}) {
-  return (
-    <div
-      style={{
-        textAlign: "center",
-        padding: "10px 4px",
-        borderRadius: 12,
-        background: "rgba(255,255,255,.04)",
-      }}
-    >
-      <div style={{ fontWeight: 850 }}>{value}</div>
-
-      <div
-        style={{
-          fontSize: 10,
-          opacity: 0.45,
-          marginTop: 3,
-        }}
-      >
-        {label}
-      </div>
-    </div>
-  );
-}
-
-function QuickLink({
-  icon,
-  title,
-}: {
-  icon: React.ReactNode;
-  title: string;
-}) {
-  return (
-    <button
-      type="button"
-      style={{
-        width: "100%",
-        border: "none",
-        background: "transparent",
-        color: "#fff",
-        display: "flex",
-        alignItems: "center",
-        gap: 11,
-        padding: "12px 0",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      {icon}
-      <span style={{ flex: 1 }}>{title}</span>
-      <ChevronRight size={15} opacity={0.4} />
-    </button>
-  );
-}
-
-function MobileNav({
-  icon,
-  label,
-}: {
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      style={{
-        border: "none",
-        background: "transparent",
-        color: "#fff",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 3,
-        fontSize: 9,
-        opacity: 0.8,
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-/* STYLES */
-
-const iconButton: React.CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: 12,
-  border: "1px solid rgba(255,255,255,.08)",
-  background: "rgba(255,255,255,.05)",
-  color: "#fff",
-  display: "grid",
-  placeItems: "center",
-  cursor: "pointer",
-};
-
-const primaryButton: React.CSSProperties = {
-  border: "none",
-  borderRadius: 12,
-  padding: "11px 16px",
-  background: "#fff",
-  color: "#111",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const whiteButton: React.CSSProperties = {
-  border: "none",
-  borderRadius: 13,
-  padding: "12px 18px",
-  background: "#fff",
-  color: "#111",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const darkButton: React.CSSProperties = {
-  border: "1px solid rgba(255,255,255,.25)",
-  borderRadius: 13,
-  padding: "12px 18px",
-  background: "rgba(0,0,0,.25)",
-  color: "#fff",
-  fontWeight: 800,
-  cursor: "pointer",
-};
-
-const sideCard: React.CSSProperties = {
-  borderRadius: 20,
-  border: "1px solid rgba(255,255,255,.08)",
-  background: "rgba(255,255,255,.04)",
-  padding: 18,
-};
-
-const avatar: React.CSSProperties = {
-  width: 40,
-  height: 40,
-  borderRadius: "50%",
-  display: "grid",
-  placeItems: "center",
-  background:
-    "linear-gradient(135deg, #7c3aed, #ec4899)",
-  fontWeight: 850,
-  flexShrink: 0,
-};
-
-const largeAvatar: React.CSSProperties = {
-  width: 52,
-  height: 52,
-  borderRadius: "50%",
-  display: "grid",
-  placeItems: "center",
-  background:
-    "linear-gradient(135deg, #7c3aed, #ec4899)",
-  fontWeight: 900,
-  fontSize: 20,
-};
-
-const actionButton: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 7,
-  border: "none",
-  background: "rgba(255,255,255,.05)",
-  color: "#fff",
-  padding: "9px 12px",
-  borderRadius: 10,
-  cursor: "pointer",
-};
-
-const moreButton: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#fff",
-  opacity: 0.5,
-  cursor: "pointer",
-};
-
-const smallLink: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#c084fc",
-  fontSize: 12,
-  cursor: "pointer",
-};

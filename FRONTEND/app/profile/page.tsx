@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import FeatureShell, {
@@ -8,7 +8,7 @@ import FeatureShell, {
 } from "../../components/FeatureShell";
 
 export default function Page() {
-  const [name, setName] = useState("Ayo Creator");
+  const [name, setName] = useState("SIX20 Creator");
   const [editing, setEditing] = useState(false);
 
   return (
@@ -42,7 +42,7 @@ export default function Page() {
             <h2 style={{ margin: "0 0 4px" }}>{name}</h2>
 
             <div style={{ color: "#8fa198" }}>
-              @ayocreator
+              @six20creator
             </div>
           </div>
         </div>

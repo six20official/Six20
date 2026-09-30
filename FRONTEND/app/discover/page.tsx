@@ -1,4 +1,141 @@
 "use client";
-import {useMemo,useState} from 'react'; import FeatureShell,{Card,btn,ghost} from '@/components/FeatureShell';
-const creators=[['Ayo Creator','@ayocreator','12.4K'],['Nija Vibes','@nijavibes','8.9K'],['Naija Foodie','@naijafoodie','21.7K'],['Lagos Dancer','@lagosdancer','34K']];
-export default function Page(){const [q,setQ]=useState('');const [following,setFollowing]=useState<string[]>([]);const list=useMemo(()=>creators.filter(x=>x[0].toLowerCase().includes(q.toLowerCase())||x[1].includes(q.toLowerCase())),[q]);return <FeatureShell title="Discover" subtitle="Find creators, sounds and communities across HowFar."><div style={{display:'grid',gap:16}}><input value={q} onChange={e=>setQ(e."target": "ES2017".value)} placeholder="Search creators..." style={{padding:14,borderRadius:12,border:'1px solid #294037',background:'#09120e',color:'#fff'}}/><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14}}>{list.map(([name,user,likes])=><Card key={user}><div style={{fontSize:18,fontWeight:700}}>{name}</div><div style={{color:'#8fa198',margin:'6px 0 14px'}}>{user} · {likes} followers</div><button style={following.includes(user)?ghost:btn} onClick={()=>setFollowing(f=>f.includes(user)?f.filter(x=>x!==user):[...f,user])}>{following.includes(user)?'Following':'Follow'}</button></Card>)}</div></div></FeatureShell>}
+
+import { useMemo, useState } from "react";
+import FeatureShell, {
+  Card,
+  btn,
+} from "../../components/FeatureShell";
+
+const items = [
+  {
+    title: "SIX20 Live",
+    text: "Watch creators and communities live.",
+    tag: "LIVE",
+  },
+  {
+    title: "Play",
+    text: "Challenge friends with games and quizzes.",
+    tag: "PLAY",
+  },
+  {
+    title: "Music",
+    text: "Discover sounds, artists and entertainment.",
+    tag: "MUSIC",
+  },
+  {
+    title: "Events",
+    text: "Find events and experiences around you.",
+    tag: "EVENTS",
+  },
+  {
+    title: "Market",
+    text: "Discover products, offers and creator picks.",
+    tag: "MARKET",
+  },
+  {
+    title: "Creators",
+    text: "Find creators and communities to follow.",
+    tag: "CREATORS",
+  },
+];
+
+export default function Page() {
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(() => {
+    const search = q.trim().toLowerCase();
+
+    if (!search) {
+      return items;
+    }
+
+    return items.filter(
+      (item) =>
+        item.title.toLowerCase().includes(search) ||
+        item.text.toLowerCase().includes(search) ||
+        item.tag.toLowerCase().includes(search)
+    );
+  }, [q]);
+
+  return (
+    <FeatureShell
+      title="Discover"
+      subtitle="Explore everything happening across SIX20."
+    >
+      <Card>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search SIX20..."
+          style={{
+            width: "100%",
+            padding: "14px 16px",
+            borderRadius: 14,
+            border: "1px solid rgba(255,255,255,.12)",
+            background: "rgba(255,255,255,.05)",
+            color: "white",
+            outline: "none",
+          }}
+        />
+      </Card>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(220px, 1fr))",
+          gap: 16,
+          marginTop: 18,
+        }}
+      >
+        {filtered.map((item) => (
+          <Card key={item.title}>
+            <div
+              style={{
+                fontSize: 12,
+                opacity: 0.65,
+                marginBottom: 10,
+              }}
+            >
+              {item.tag}
+            </div>
+
+            <h2
+              style={{
+                margin: "0 0 8px",
+                fontSize: 22,
+              }}
+            >
+              {item.title}
+            </h2>
+
+            <p
+              style={{
+                opacity: 0.7,
+                lineHeight: 1.5,
+              }}
+            >
+              {item.text}
+            </p>
+
+            <button
+              style={btn}
+              type="button"
+              onClick={() => {}}
+            >
+              Explore
+            </button>
+          </Card>
+        ))}
+      </div>
+
+      {filtered.length === 0 && (
+        <Card>
+          <p style={{ margin: 0, opacity: 0.7 }}>
+            No SIX20 content found for &quot;{q}&quot;.
+          </p>
+        </Card>
+      )}
+    </FeatureShell>
+  );
+}

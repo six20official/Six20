@@ -1,20 +1,152 @@
-"use client";
 import Link from "next/link";
-import { ArrowLeft, Bell, Compass, Gamepad2, Home, MessageCircle, Radio, ShoppingBag, User, Wallet } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties } from "react";
+import {
+  ArrowLeft,
+  Bell,
+  Compass,
+  Gamepad2,
+  Home,
+  MessageCircle,
+  Radio,
+  User,
+} from "lucide-react";
 
-const nav=[['Home','/',Home],['Discover','/discover',Compass],['LIVE','/live',Radio],['Messages','/messages',MessageCircle],['Notifications','/notifications',Bell],['Marketplace','/marketplace',ShoppingBag],['Wallet','/wallet',Wallet],['Games','/games',Gamepad2],['Profile','/profile',User]] as const;
-export default function FeatureShell({title,subtitle,children}:{title:string;subtitle:string;children:ReactNode}){
- return <main style={{minHeight:'100vh',background:'#050b08',color:'#fff',fontFamily:'Arial,Helvetica,sans-serif'}}>
-  <header style={{position:'sticky',top:0,zIndex:10,display:'flex',alignItems:'center',gap:18,padding:'16px 22px',background:'rgba(5,11,8,.96)',borderBottom:'1px solid #1d3027'}}>
-   <Link href="/" style={{display:'flex',alignItems:'center',gap:7,color:'#fff',textDecoration:'none'}}><ArrowLeft size={19}/> HowFar</Link>
-   <nav style={{display:'flex',gap:8,overflowX:'auto'}}>{nav.map(([label,href,Icon])=><Link key={href} href={href} style={{display:'flex',alignItems:'center',gap:6,padding:'8px 11px',borderRadius:10,color:href===`/${title.toLowerCase()}`?'#69f5a2':'#b7c5be',textDecoration:'none',whiteSpace:'nowrap',background:href===`/${title.toLowerCase()}`?'#123b28':'transparent'}}><Icon size={16}/>{label}</Link>)}</nav>
-  </header>
-  <section style={{maxWidth:1100,margin:'0 auto',padding:'34px 20px 60px'}}>
-   <h1 style={{fontSize:36,margin:'0 0 8px'}}>{title}</h1><p style={{color:'#9eafa7',marginTop:0}}>{subtitle}</p>{children}
-  </section>
- </main>
+export const btn: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  padding: "10px 16px",
+  borderRadius: "12px",
+  background: "#6C3BFF",
+  color: "#ffffff",
+  fontWeight: 700,
+  fontSize: "14px",
+  border: "0",
+  cursor: "pointer",
+};
+
+export const ghost: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "8px",
+  padding: "10px 16px",
+  borderRadius: "12px",
+  background: "#ffffff",
+  color: "#17132F",
+  fontWeight: 700,
+  fontSize: "14px",
+  border: "1px solid rgba(0,0,0,0.08)",
+  cursor: "pointer",
+};
+
+export function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`rounded-3xl border border-black/[0.06] bg-white p-5 shadow-sm ${className}`}
+    >
+      {children}
+    </div>
+  );
 }
-export function Card({children}:{children:ReactNode}){return <div style={{background:'#0b1510',border:'1px solid #1b2b24',borderRadius:18,padding:18}}>{children}</div>}
-export const btn={background:'#35d978',color:'#041009',border:0,borderRadius:11,padding:'10px 15px',fontWeight:700,cursor:'pointer'} as const;
-export const ghost={background:'#101d16',color:'#d8e4de',border:'1px solid #294037',borderRadius:11,padding:'10px 15px',cursor:'pointer'} as const;
+
+export default function FeatureShell({
+  title,
+  subtitle,
+  children,
+}: {
+  title?: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <main className="min-h-screen bg-[#FFFDF8] text-[#17132F]">
+      <header className="sticky top-0 z-50 border-b border-black/[0.06] bg-[#FFFDF8]/90 backdrop-blur-xl">
+        <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-5 lg:px-8">
+          <Link
+            href="/"
+            className="flex items-center gap-2 font-black tracking-tight"
+          >
+            <ArrowLeft size={18} />
+            <span>
+              SIX<span className="text-[#6C3BFF]">20</span>
+            </span>
+          </Link>
+
+          <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/notifications"
+              className="grid h-10 w-10 place-items-center rounded-xl border border-black/[0.07] bg-white transition hover:shadow-md"
+            >
+              <Bell size={17} />
+            </Link>
+
+            <Link
+              href="/profile"
+              className="grid h-10 w-10 place-items-center rounded-xl bg-[#17132F] text-white"
+            >
+              <User size={17} />
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl px-5 pb-24 pt-8 lg:px-8">
+        {(title || subtitle) && (
+          <div className="mb-8">
+            {title && (
+              <h1 className="text-4xl font-black tracking-[-.05em]">
+                {title}
+              </h1>
+            )}
+
+            {subtitle && (
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-[#756F80]">
+                {subtitle}
+              </p>
+            )}
+          </div>
+        )}
+
+        {children}
+      </div>
+
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-black/[0.06] bg-[#FFFDF8]/95 px-2 py-2 backdrop-blur-xl lg:hidden">
+        <div className="mx-auto flex max-w-lg items-center justify-around">
+          <NavItem href="/" label="Home" icon={Home} />
+          <NavItem href="/discover" label="Discover" icon={Compass} />
+          <NavItem href="/live" label="LIVE" icon={Radio} />
+          <NavItem href="/games" label="Play" icon={Gamepad2} />
+          <NavItem href="/messages" label="Chat" icon={MessageCircle} />
+        </div>
+      </nav>
+    </main>
+  );
+}
+
+function NavItem({
+  href,
+  label,
+  icon: Icon,
+}: {
+  href: string;
+  label: string;
+  icon: typeof Home;
+}) {
+  return (
+    <Link
+      href={href}
+      className="flex flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[10px] font-bold text-[#817A8D] transition hover:text-[#6C3BFF]"
+    >
+      <Icon size={19} />
+      <span>{label}</span>
+    </Link>
+  );
+}

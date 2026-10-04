@@ -11,6 +11,7 @@ import fs from "fs";
 import multer from "multer";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import { registerLiveProductionRoutes } from "./live-production";
 
@@ -24,7 +25,13 @@ const prisma = new PrismaClient();
 const PORT = Number(process.env.PORT || 4000);
 
 const JWT_SECRET =
-  process.env.JWT_SECRET || "six20-development-secret";
+  process.env.JWT_SECRET?.trim();
+
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+  throw new Error(
+    "JWT_SECRET must be configured and at least 32 characters long."
+  );
+}
 
 const FRONTEND_URL =
   process.env.FRONTEND_URL || "http://localhost:3000";
@@ -71,6 +78,32 @@ app.use(
   "/uploads",
   express.static(uploadDir)
 );
+
+// ======================================================
+// RATE LIMITING
+// ======================================================
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: "Too many authentication attempts. Please try again later.",
+  },
+});
+
+const giftLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: {
+    success: false,
+    error: "Too many gift requests. Please slow down.",
+  },
+});
 
 // ======================================================
 // MULTER
@@ -210,6 +243,61 @@ function requireAuth(
   }
 }
 
+async function requireAdmin(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) {
+  try {
+    if (!req.userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required",
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: req.userId,
+      },
+      select: {
+        isAdmin: true,
+        isBlocked: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: "User account not found",
+      });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({
+        success: false,
+        error: "Account is blocked",
+      });
+    }
+
+    if (!user.isAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: "Administrator access required",
+      });
+    }
+
+    return next();
+  } catch (error) {
+    console.error("ADMIN AUTH ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Unable to verify administrator access",
+    });
+  }
+}
+
 // ======================================================
 // ROOT
 // ======================================================
@@ -301,6 +389,7 @@ app.get(
 
 app.post(
   "/api/auth/register",
+  authLimiter,
   async (
     req: Request,
     res: Response
@@ -441,6 +530,7 @@ app.post(
 
 app.post(
   "/api/auth/login",
+  authLimiter,
   async (
     req: Request,
     res: Response
@@ -2544,6 +2634,9 @@ app.get(
 
 app.post(
   "/api/gifts",
+  giftLimiter,
+  requireAuth,
+  requireAdmin,
   async (
     req: Request,
     res: Response
@@ -2799,6 +2892,7 @@ app.get(
 
 app.post(
   "/api/gifts/send",
+  giftLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -2970,44 +3064,32 @@ app.post(
         totalCoins -
         creatorEarn;
 
-      const senderWallet =
-        await prisma.wallet.upsert({
-          where: {
-            userId:
-              senderId,
-          },
-
-          update: {},
-
-          create: {
-            userId:
-              senderId,
-          },
-        });
-
-      if (
-        senderWallet.coins <
-        totalCoins
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Insufficient coins",
-          requiredCoins:
-            totalCoins,
-          availableCoins:
-            senderWallet.coins,
-        });
-      }
-
       const result =
         await prisma.$transaction(
           async (tx) => {
-            const updatedSenderWallet =
-              await tx.wallet.update({
+            await tx.wallet.upsert({
+              where: {
+                userId:
+                  senderId,
+              },
+
+              update: {},
+
+              create: {
+                userId:
+                  senderId,
+              },
+            });
+
+            const debit =
+              await tx.wallet.updateMany({
                 where: {
                   userId:
                     senderId,
+                  coins: {
+                    gte:
+                      totalCoins,
+                  },
                 },
 
                 data: {
@@ -3017,6 +3099,12 @@ app.post(
                   },
                 },
               });
+
+            if (debit.count !== 1) {
+              throw new Error(
+                "INSUFFICIENT_COINS"
+              );
+            }
 
             const receiverWallet =
               await tx.wallet.upsert({
@@ -3142,6 +3230,28 @@ app.post(
           result.transaction,
       });
     } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === "INSUFFICIENT_COINS"
+      ) {
+        const wallet =
+          await prisma.wallet.findUnique({
+            where: {
+              userId: senderId,
+            },
+            select: {
+              coins: true,
+            },
+          });
+
+        return res.status(400).json({
+          success: false,
+          message: "Insufficient coins",
+          requiredCoins: totalCoins,
+          availableCoins: wallet?.coins ?? 0,
+        });
+      }
+
       console.error(
         "SEND GIFT ERROR:",
         error

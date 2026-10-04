@@ -1,0 +1,536 @@
+﻿@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --purple: #6947f5;
+  --purple-dark: #4c32b9;
+  --coral: #ff7a66;
+  --green: #25a77a;
+  --gold: #e59a2f;
+  --dark: #171329;
+  --muted: #716a7d;
+  --background: #f7f5fc;
+  --border: #e5dfec;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+html {
+  background: var(--background);
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: #1b1734;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+img {
+  max-width: 100%;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* =========================================================
+   SIX20 INTRO
+   ========================================================= */
+
+.six20-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #110d24;
+  color: #ffffff;
+  animation: six20IntroExit 0.65s ease 2.15s forwards;
+}
+
+.six20-intro-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      rgba(105, 71, 245, 0.28),
+      transparent 35%
+    ),
+    radial-gradient(
+      circle at 15% 20%,
+      rgba(255, 122, 102, 0.17),
+      transparent 30%
+    ),
+    radial-gradient(
+      circle at 85% 80%,
+      rgba(37, 167, 122, 0.14),
+      transparent 30%
+    ),
+    linear-gradient(
+      135deg,
+      #100c21 0%,
+      #18112f 48%,
+      #0f0b20 100%
+    );
+}
+
+.six20-intro-content {
+  position: relative;
+  z-index: 5;
+  width: min(700px, 90vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.six20-intro-logo {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  font-size: clamp(55px, 10vw, 100px);
+  font-weight: 1000;
+  line-height: 0.9;
+  letter-spacing: -7px;
+  opacity: 0;
+  transform: translateY(25px) scale(0.92);
+  animation: six20LogoIn 0.8s cubic-bezier(0.2, 0.8, 0.2, 1)
+    0.12s forwards;
+}
+
+.six20-intro-logo span {
+  color: #ffffff;
+}
+
+.six20-intro-logo strong {
+  color: var(--coral);
+  font-weight: 1000;
+}
+
+.six20-intro-line {
+  width: 0;
+  height: 2px;
+  margin-top: 20px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--purple),
+    var(--coral),
+    transparent
+  );
+  animation: six20LineIn 0.8s ease 0.55s forwards;
+}
+
+.six20-intro-title {
+  margin-top: 25px;
+  font-size: clamp(13px, 2vw, 18px);
+  font-weight: 900;
+  letter-spacing: 5px;
+  opacity: 0;
+  transform: translateY(15px);
+  animation: six20TextIn 0.65s ease 0.82s forwards;
+}
+
+.six20-intro-subtitle {
+  margin-top: 7px;
+  color: #b8abff;
+  font-size: clamp(12px, 1.8vw, 17px);
+  font-weight: 900;
+  letter-spacing: 4px;
+  opacity: 0;
+  transform: translateY(15px);
+  animation: six20TextIn 0.65s ease 0.98s forwards;
+}
+
+.six20-intro-services {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 29px;
+  opacity: 0;
+  transform: translateY(12px);
+  animation: six20TextIn 0.7s ease 1.18s forwards;
+}
+
+.six20-intro-services span {
+  padding: 7px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.055);
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: 1px;
+}
+
+.six20-intro-loading {
+  width: min(250px, 60vw);
+  height: 2px;
+  margin-top: 35px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 0;
+  animation: six20TextIn 0.5s ease 1.35s forwards;
+}
+
+.six20-intro-loading div {
+  width: 35%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--purple),
+    var(--coral)
+  );
+  animation: six20Loading 1.05s ease-in-out 1.45s forwards;
+}
+
+.six20-intro-glow {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: blur(65px);
+}
+
+.six20-intro-glow.purple {
+  width: 260px;
+  height: 260px;
+  top: 10%;
+  left: 10%;
+  background: var(--purple);
+  opacity: 0.3;
+  animation: six20Float 5s ease-in-out infinite;
+}
+
+.six20-intro-glow.green {
+  width: 220px;
+  height: 220px;
+  right: 8%;
+  bottom: 13%;
+  background: var(--green);
+  opacity: 0.3;
+  animation: six20Float 6s ease-in-out infinite reverse;
+}
+
+.six20-intro-glow.gold {
+  width: 170px;
+  height: 170px;
+  top: 18%;
+  right: 20%;
+  background: var(--gold);
+  opacity: 0.18;
+}
+
+.six20-intro-glow.coral {
+  width: 210px;
+  height: 210px;
+  bottom: 12%;
+  left: 16%;
+  background: var(--coral);
+  opacity: 0.18;
+}
+
+.six20-intro-rings {
+  position: absolute;
+  width: min(80vw, 700px);
+  aspect-ratio: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.six20-intro-rings div {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 50%;
+}
+
+.six20-intro-rings div:nth-child(1) {
+  transform: scale(0.55);
+}
+
+.six20-intro-rings div:nth-child(2) {
+  transform: scale(0.75);
+}
+
+.six20-intro-rings div:nth-child(3) {
+  transform: scale(0.95);
+}
+
+/* =========================================================
+   ANIMATIONS
+   ========================================================= */
+
+@keyframes six20LogoIn {
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes six20LineIn {
+  to {
+    width: min(270px, 55vw);
+  }
+}
+
+@keyframes six20TextIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes six20Loading {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(330%);
+  }
+}
+
+@keyframes six20Float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(25px, -20px, 0);
+  }
+}
+
+@keyframes six20IntroExit {
+  to {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* =========================================================
+   RESPONSIVE
+   ========================================================= */
+
+@media (max-width: 1050px) {
+  main header nav {
+    display: none !important;
+  }
+
+  main section {
+    overflow: hidden;
+  }
+}
+
+@media (max-width: 760px) {
+  body {
+    min-width: 0;
+  }
+
+  main header {
+    position: relative !important;
+  }
+
+  main header > div {
+    padding: 10px 14px !important;
+  }
+
+  main header > div > div:nth-child(2) {
+    display: none !important;
+  }
+
+  main section {
+    width: 100%;
+  }
+
+  main section:first-of-type {
+    padding-top: 45px !important;
+    padding-bottom: 35px !important;
+  }
+
+  main section:first-of-type > div {
+    grid-template-columns: 1fr !important;
+    gap: 32px !important;
+  }
+
+  main section:first-of-type > div > div:last-child {
+    min-height: 430px !important;
+  }
+
+  main section:nth-of-type(2) > div {
+    padding-top: 45px !important;
+    padding-bottom: 45px !important;
+  }
+
+  main section:nth-of-type(3) > div {
+    grid-template-columns: 1fr !important;
+    padding-top: 45px !important;
+    padding-bottom: 45px !important;
+  }
+
+  main section:nth-of-type(4) > div {
+    padding-top: 45px !important;
+    padding-bottom: 45px !important;
+  }
+
+  main section:nth-of-type(4) > div > div {
+    grid-template-columns: 1fr !important;
+  }
+
+  main section:nth-of-type(5) > div {
+    grid-template-columns: 1fr !important;
+  }
+
+  main section:nth-of-type(6) > div {
+    padding-top: 50px !important;
+    padding-bottom: 50px !important;
+  }
+
+  h1 {
+    font-size: clamp(44px, 13vw, 62px) !important;
+    line-height: 0.95 !important;
+    letter-spacing: -3.5px !important;
+  }
+
+  h2 {
+    letter-spacing: -1.7px !important;
+  }
+
+  main section:nth-of-type(2) > div > div:last-child {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  footer > div {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+}
+
+@media (max-width: 520px) {
+  main header > div {
+    padding-right: 12px !important;
+    padding-left: 12px !important;
+  }
+
+  main section:first-of-type {
+    padding-right: 14px !important;
+    padding-left: 14px !important;
+  }
+
+  h1 {
+    font-size: 43px !important;
+    letter-spacing: -2.8px !important;
+  }
+
+  main section:nth-of-type(2) > div,
+  main section:nth-of-type(3) > div,
+  main section:nth-of-type(4) > div,
+  main section:nth-of-type(5) > div {
+    padding-right: 14px !important;
+    padding-left: 14px !important;
+  }
+
+  main section:nth-of-type(2) > div > div:last-child {
+    grid-template-columns: 1fr !important;
+  }
+
+  .six20-intro-logo {
+    font-size: 62px;
+    letter-spacing: -4px;
+  }
+
+  .six20-intro-title {
+    font-size: 11px;
+    letter-spacing: 3px;
+  }
+
+  .six20-intro-subtitle {
+    font-size: 10px;
+    letter-spacing: 2.5px;
+  }
+
+  .six20-intro-services {
+    max-width: 270px;
+    gap: 5px;
+  }
+
+  .six20-intro-services span {
+    padding: 6px 9px;
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 380px) {
+  h1 {
+    font-size: 38px !important;
+  }
+
+  .six20-intro-logo {
+    font-size: 55px;
+  }
+
+  .six20-intro-services span {
+    padding: 5px 7px;
+  }
+}
+
+/* =========================================================
+   ACCESSIBILITY
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (hover: none) {
+  button {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  input {
+    font-size: 16px;
+  }
+}

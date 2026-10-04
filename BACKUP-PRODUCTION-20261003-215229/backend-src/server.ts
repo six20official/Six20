@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 
 import express, {
   type Request,
@@ -12,7 +12,6 @@ import multer from "multer";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
-import { registerLiveProductionRoutes } from "./live-production";
 
 // ======================================================
 // SIX20 BACKEND
@@ -3433,5 +3432,3 @@ process.on(
 // ======================================================
 
 startServer();
-registerLiveProductionRoutes(app, prisma, requireAuth);
-

@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -35,7 +36,6 @@ model User {
   sentGifts           GiftTransaction[]    @relation("SentGifts")
   likes               Like[]
   liveSessions        LiveSession[]
-  liveChatMessages LiveChatMessage[]
   liveViewers         LiveViewer[]
   receivedMessages    Message[]            @relation("ReceivedMessages")
   sentMessages        Message[]            @relation("SentMessages")
@@ -183,7 +183,6 @@ model LiveSession {
   createdAt   DateTime     @default(now())
   creator     User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   viewers     LiveViewer[]
-  chatMessages LiveChatMessage[]
 }
 
 model LiveViewer {
@@ -472,18 +471,3 @@ model SecurityEvent {
   @@index([type])
   @@index([createdAt])
 }
-
-model LiveChatMessage {
-  id            Int         @id @default(autoincrement())
-  liveSessionId Int
-  userId        Int
-  text          String
-  createdAt     DateTime    @default(now())
-
-  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([liveSessionId, createdAt])
-  @@index([userId, createdAt])
-}
-

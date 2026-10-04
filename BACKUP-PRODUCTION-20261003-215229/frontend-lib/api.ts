@@ -8,7 +8,9 @@ export async function apiFetch(
 ) {
   const url = endpoint.startsWith("http")
     ? endpoint
-    : `${API_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+    : `${API_URL}${
+        endpoint.startsWith("/") ? endpoint : `/${endpoint}`
+      }`;
 
   const response = await fetch(url, {
     ...options,

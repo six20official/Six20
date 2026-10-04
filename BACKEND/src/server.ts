@@ -103,6 +103,9 @@ const giftLimiter = rateLimit({
     error: "Too many gift requests. Please slow down.",
   },
 });
+const liveStartLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false });
+const livePresenceLimiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: "draft-8", legacyHeaders: false });
+const liveEndLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false });
 
 const financialLimiter = rateLimit({ windowMs: 60 * 1000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false });
 
@@ -153,6 +156,11 @@ const upload = multer({
 interface AuthenticatedRequest
   extends Request {
   userId?: number;
+}
+
+function publicLive<T extends { streamKey?: string | null }>(live: T) {
+  const { streamKey: _streamKey, ...safeLive } = live;
+  return safeLive;
 }
 
 // ======================================================
@@ -1804,6 +1812,7 @@ app.patch(
 
 app.post(
   "/api/live",
+  liveStartLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -1838,6 +1847,11 @@ app.post(
         });
       }
 
+      if (title.trim().length > 120 || (typeof description === "string" && description.length > 1000)) return res.status(400).json({ success: false, message: "LIVE title or description is too long" });
+
+      const activeLive = await prisma.liveSession.findFirst({ where: { creatorId: userId, status: "live" }, select: { id: true } });
+      if (activeLive) return res.status(409).json({ success: false, message: "You already have an active LIVE session", liveId: activeLive.id });
+
       const live =
         await prisma.liveSession.create({
           data: {
@@ -1871,7 +1885,9 @@ app.post(
 
       return res.status(201).json({
         success: true,
-        live,
+        live: publicLive(live),
+        viewerCount: 0,
+        chat: { endpoint: `/api/live/${live.id}/chat` },
       });
     } catch (error) {
       console.error(
@@ -1923,9 +1939,12 @@ app.get(
           },
         });
 
+      const cutoff = new Date(Date.now() - 75_000);
+      await prisma.liveViewer.deleteMany({ where: { lastSeenAt: { lt: cutoff }, liveSession: { status: "live" } } });
+      const withCounts = await Promise.all(lives.map(async item => ({ ...publicLive(item), viewerCount: await prisma.liveViewer.count({ where: { liveSessionId: item.id, lastSeenAt: { gte: cutoff } } }) })));
       return res.json({
         success: true,
-        lives,
+        lives: withCounts,
       });
     } catch (error) {
       console.error(
@@ -1963,6 +1982,9 @@ app.get(
             "Invalid live session ID",
         });
       }
+
+      const cutoff = new Date(Date.now() - 75_000);
+      await prisma.liveViewer.deleteMany({ where: { liveSessionId: liveId, lastSeenAt: { lt: cutoff } } });
 
       const live =
         await prisma.liveSession.findUnique({
@@ -2011,9 +2033,13 @@ app.get(
         });
       }
 
+      const activeCount = await prisma.liveViewer.count({ where: { liveSessionId: liveId, lastSeenAt: { gte: cutoff } } });
+      if (live.status === "live" && live.viewerCount !== activeCount) await prisma.liveSession.updateMany({ where: { id: liveId, status: "live" }, data: { viewerCount: activeCount } });
+
+      const activeViewerCount = live.status === "live" ? await prisma.liveViewer.count({ where: { liveSessionId: liveId, lastSeenAt: { gte: cutoff } } }) : 0;
       return res.json({
         success: true,
-        live,
+        live: { ...publicLive(live), viewerCount: activeViewerCount },
       });
     } catch (error) {
       console.error(
@@ -2036,6 +2062,7 @@ app.get(
 
 app.post(
   "/api/live/:id/start",
+  liveStartLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -2070,6 +2097,9 @@ app.post(
             id:
               liveId,
           },
+          include: {
+            creator: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+          },
         });
 
       if (!existing) {
@@ -2099,10 +2129,15 @@ app.post(
           success: true,
           message:
             "Livestream is already live",
-          live:
-            existing,
+          live: publicLive(existing),
+          viewerCount: await prisma.liveViewer.count({ where: { liveSessionId: liveId, lastSeenAt: { gte: new Date(Date.now() - 75_000) } } }),
+          chat: { endpoint: `/api/live/${liveId}/chat` },
         });
       }
+
+      if (existing.status === "ended") return res.status(409).json({ success: false, message: "An ended LIVE session cannot be restarted" });
+      const anotherLive = await prisma.liveSession.findFirst({ where: { creatorId: userId, status: "live", id: { not: liveId } }, select: { id: true } });
+      if (anotherLive) return res.status(409).json({ success: false, message: "You already have another active LIVE session" });
 
       const live =
         await prisma.liveSession.update({
@@ -2119,11 +2154,16 @@ app.post(
             endedAt:
               null,
           },
+          include: {
+            creator: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+          },
         });
 
       return res.json({
         success: true,
-        live,
+        live: publicLive(live),
+        viewerCount: 0,
+        chat: { endpoint: `/api/live/${liveId}/chat` },
       });
     } catch (error) {
       console.error(
@@ -2146,6 +2186,7 @@ app.post(
 
 app.post(
   "/api/live/:id/end",
+  liveEndLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -2202,27 +2243,16 @@ app.post(
       }
 
       const live =
-        await prisma.liveSession.update({
-          where: {
-            id:
-              liveId,
-          },
-
-          data: {
-            status:
-              "ended",
-
-            endedAt:
-              new Date(),
-
-            viewerCount:
-              0,
-          },
+        await prisma.$transaction(async tx => {
+          const updated = await tx.liveSession.updateMany({ where: { id: liveId, creatorId: userId, status: { not: "ended" } }, data: { status: "ended", endedAt: new Date(), viewerCount: 0 } });
+          if (updated.count === 0 && existing.status !== "ended") throw new Error("LIVE_END_CONFLICT");
+          await tx.liveViewer.deleteMany({ where: { liveSessionId: liveId } });
+          return tx.liveSession.findUniqueOrThrow({ where: { id: liveId } });
         });
 
       return res.json({
         success: true,
-        live,
+        live: publicLive(live),
       });
     } catch (error) {
       console.error(
@@ -2245,6 +2275,7 @@ app.post(
 
 app.post(
   "/api/live/:id/join",
+  livePresenceLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -2300,6 +2331,8 @@ app.post(
         });
       }
 
+      if (live.creatorId === userId) return res.json({ success: true, live, viewerCount: live.viewerCount });
+
       await prisma.liveViewer.upsert({
         where: {
           liveSessionId_userId: {
@@ -2310,22 +2343,25 @@ app.post(
         },
 
         update: {
-          joinedAt:
-            new Date(),
+          lastSeenAt: new Date(),
         },
 
         create: {
           liveSessionId:
             liveId,
           userId,
+          lastSeenAt: new Date(),
         },
       });
 
+      const cutoff = new Date(Date.now() - 75_000);
+      await prisma.liveViewer.deleteMany({ where: { liveSessionId: liveId, lastSeenAt: { lt: cutoff } } });
       const viewerCount =
         await prisma.liveViewer.count({
           where: {
             liveSessionId:
               liveId,
+            lastSeenAt: { gte: cutoff },
           },
         });
 
@@ -2343,8 +2379,7 @@ app.post(
 
       return res.json({
         success: true,
-        live:
-          updatedLive,
+        live: publicLive(updatedLive),
         viewerCount,
       });
     } catch (error) {
@@ -2368,6 +2403,7 @@ app.post(
 
 app.post(
   "/api/live/:id/leave",
+  livePresenceLimiter,
   requireAuth,
   async (
     req: AuthenticatedRequest,
@@ -2404,11 +2440,13 @@ app.post(
         },
       });
 
+      const cutoff = new Date(Date.now() - 75_000);
       const viewerCount =
         await prisma.liveViewer.count({
           where: {
             liveSessionId:
               liveId,
+            lastSeenAt: { gte: cutoff },
           },
         });
 
@@ -2427,7 +2465,7 @@ app.post(
       return res.json({
         success: true,
         viewerCount,
-        live,
+        live: publicLive(live),
       });
     } catch (error) {
       console.error(
@@ -2824,6 +2862,38 @@ app.post(
 // WALLET
 // ======================================================
 
+app.patch("/api/gifts/:id", giftLimiter, requireAuth, requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const giftId = Number(req.params.id);
+    if (!Number.isSafeInteger(giftId) || giftId < 1) return res.status(400).json({ success: false, message: "Invalid gift ID" });
+    const existing = await prisma.gift.findUnique({ where: { id: giftId } });
+    if (!existing) return res.status(404).json({ success: false, message: "Gift not found" });
+    const data: Record<string, unknown> = {};
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name || name.length > 80) return res.status(400).json({ success: false, message: "Gift name must be 1–80 characters" });
+      data.name = name;
+    }
+    if (req.body?.priceKobo !== undefined || req.body?.priceNaira !== undefined) {
+      const kobo = req.body.priceKobo !== undefined ? Number(req.body.priceKobo) : Math.round(Number(req.body.priceNaira) * 100);
+      if (!Number.isSafeInteger(kobo) || kobo <= 0 || kobo > 2_000_000_000) return res.status(400).json({ success: false, message: "Gift price must be a valid positive NGN amount" });
+      data.priceKobo = kobo;
+    }
+    if (req.body?.isActive !== undefined) {
+      if (typeof req.body.isActive !== "boolean") return res.status(400).json({ success: false, message: "isActive must be a boolean" });
+      data.isActive = req.body.isActive;
+    }
+    if (req.body?.imageUrl !== undefined) data.imageUrl = typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim().slice(0, 2048) || null : null;
+    if (!Object.keys(data).length) return res.status(400).json({ success: false, message: "No supported gift changes provided" });
+    const gift = await prisma.gift.update({ where: { id: giftId }, data });
+    const { priceCoins: _legacyPrice, ...safeGift } = gift;
+    return res.json({ success: true, gift: safeGift });
+  } catch (error) {
+    console.error("UPDATE GIFT ERROR:", error);
+    return res.status(500).json({ success: false, message: "Could not update gift" });
+  }
+});
+
 // ------------------------------------------------------
 // GET MY WALLET
 // ------------------------------------------------------
@@ -2883,6 +2953,8 @@ app.get(
 // Gift sending is registered in wallet-routes.ts.
 
 // Wallet read endpoints are registered in wallet-routes.ts.
+
+registerLiveProductionRoutes(app, prisma, requireAuth);
 
 // 404
 // ======================================================
@@ -3020,5 +3092,4 @@ process.on(
 // ======================================================
 
 startServer();
-registerLiveProductionRoutes(app, prisma, requireAuth);
 

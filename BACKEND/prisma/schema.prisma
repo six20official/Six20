@@ -197,10 +197,12 @@ model LiveViewer {
   liveSessionId Int
   userId        Int
   joinedAt      DateTime    @default(now())
+  lastSeenAt    DateTime    @default(dbgenerated("'1970-01-01T00:00:00.000Z'"))
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
 
   @@unique([liveSessionId, userId])
+  @@index([liveSessionId, lastSeenAt])
 }
 
 model Gift {

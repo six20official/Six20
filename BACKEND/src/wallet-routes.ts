@@ -117,33 +117,55 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
   app.post("/api/gifts/send", limit, auth, async (req: Request, res: Response) => {
     const senderId = id(req), receiverId = Number(req.body?.receiverId), giftId = Number(req.body?.giftId);
     const quantity = Number(req.body?.quantity ?? 1), liveSessionId = req.body?.liveSessionId == null ? null : Number(req.body.liveSessionId);
-    if (!Number.isInteger(receiverId) || !Number.isInteger(giftId) || !Number.isInteger(quantity) || quantity < 1 || quantity > 100) return res.status(400).json({ message: "Invalid gift request" });
+    const clientKey = String(req.get("Idempotency-Key") || req.body?.idempotencyKey || "");
+    if (!Number.isSafeInteger(receiverId) || receiverId < 1 || !Number.isSafeInteger(giftId) || giftId < 1 || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 100 || !Number.isSafeInteger(liveSessionId) || !liveSessionId || !/^[a-zA-Z0-9_-]{16,100}$/.test(clientKey)) return res.status(400).json({ success: false, message: "Invalid gift request or idempotency key" });
     if (receiverId === senderId) return res.status(400).json({ message: "You cannot gift yourself" });
     const [gift, receiver] = await Promise.all([prisma.gift.findFirst({ where: { id: giftId, isActive: true } }), prisma.user.findUnique({ where: { id: receiverId } })]);
-    if (!gift) return res.status(404).json({ message: "Gift not found" });
-    if (!receiver) return res.status(404).json({ message: "Recipient not found" });
+    if (!gift || gift.priceKobo <= 0) return res.status(404).json({ success: false, message: "Gift is unavailable" });
+    if (!receiver) return res.status(404).json({ success: false, message: "Recipient not found" });
     if (liveSessionId !== null) {
-      const live = await prisma.liveSession.findUnique({ where: { id: liveSessionId } });
-      if (!live || live.status !== "live" || live.creatorId !== receiverId) return res.status(400).json({ message: "Invalid livestream recipient" });
+      const live = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { status: true, creatorId: true } });
+      if (!live || live.status !== "live" || live.creatorId !== receiverId) return res.status(409).json({ success: false, message: "Invalid or ended LIVE recipient" });
     }
     const totalKobo = gift.priceKobo * quantity;
-    if (!Number.isSafeInteger(totalKobo) || totalKobo <= 0) return res.status(400).json({ message: "Gift is not priced" });
+    if (!Number.isSafeInteger(totalKobo) || totalKobo <= 0 || totalKobo > 2_000_000_000) return res.status(400).json({ success: false, message: "Gift amount is invalid" });
     const creatorEarnKobo = Math.floor(totalKobo * 0.70), platformEarnKobo = totalKobo - creatorEarnKobo;
+    const idempotencyKey = `livegift:${senderId}:${clientKey}`;
+    const prior = await prisma.walletTransaction.findUnique({ where: { idempotencyKey }, select: { reference: true, amountKobo: true, description: true } });
+    if (prior) {
+      const creatorEntry = await prisma.walletTransaction.findUnique({ where: { idempotencyKey: `${prior.reference}:creator` }, select: { userId: true, amountKobo: true, description: true } });
+      const expectedDescription = `Sent ${quantity} ${gift.name}`;
+      if (prior.amountKobo !== -totalKobo || prior.description !== expectedDescription || creatorEntry?.userId !== receiverId || creatorEntry.amountKobo !== creatorEarnKobo || creatorEntry.description !== `Received ${quantity} ${gift.name}`) return res.status(409).json({ success: false, message: "Idempotency key was already used for a different gift" });
+      return res.json({ success: true, duplicate: true, reference: prior.reference, totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100, platformEarnNaira: platformEarnKobo / 100, gift: { name: gift.name, icon: gift.imageUrl } });
+    }
     const reference = ref("six20_gift");
     try {
       await prisma.$transaction(async tx => {
+        const session = await tx.liveSession.findUnique({ where: { id: liveSessionId! }, select: { status: true, creatorId: true } });
+        if (!session || session.status !== "live" || session.creatorId !== receiverId) throw new Error("LIVE_INVALID");
         const debit = await tx.wallet.updateMany({ where: { userId: senderId, availableKobo: { gte: totalKobo } }, data: { availableKobo: { decrement: totalKobo } } });
         if (!debit.count) throw new Error("INSUFFICIENT");
         await tx.wallet.upsert({ where: { userId: receiverId }, update: { availableKobo: { increment: creatorEarnKobo }, earningsKobo: { increment: creatorEarnKobo } }, create: { userId: receiverId, availableKobo: creatorEarnKobo, earningsKobo: creatorEarnKobo } });
         const giftTx = await tx.giftTransaction.create({ data: { senderId, receiverId, giftId, quantity, totalCoins: 0, creatorEarn: 0, platformEarn: 0, totalKobo, creatorEarnKobo, platformEarnKobo, liveSessionId } });
         await tx.walletTransaction.createMany({ data: [
-          { userId: senderId, type: "gift_sent", amount: 0, amountKobo: -totalKobo, reference, providerReference: reference, idempotencyKey: `${reference}:sender`, description: `Sent ${quantity} ${gift.name}` },
+          { userId: senderId, type: "gift_sent", amount: 0, amountKobo: -totalKobo, reference, providerReference: reference, idempotencyKey, description: `Sent ${quantity} ${gift.name}` },
           { userId: receiverId, type: "gift_received", amount: 0, amountKobo: creatorEarnKobo, reference, providerReference: reference, idempotencyKey: `${reference}:creator`, description: `Received ${quantity} ${gift.name}` },
         ] });
         return giftTx;
       });
-      res.status(201).json({ success: true, totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100, platformEarnNaira: platformEarnKobo / 100 });
-    } catch (e) { const insufficient = e instanceof Error && e.message === "INSUFFICIENT"; res.status(insufficient ? 400 : 500).json({ message: insufficient ? "Insufficient available balance" : "Gift could not be sent" }); }
+      res.status(201).json({ success: true, reference, totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100, platformEarnNaira: platformEarnKobo / 100, gift: { name: gift.name, icon: gift.imageUrl }, sender: { username: (await prisma.user.findUnique({ where: { id: senderId }, select: { username: true } }))?.username }, creator: { username: receiver.username }, createdAt: new Date().toISOString() });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "";
+      if (message === "INSUFFICIENT") return res.status(400).json({ success: false, message: "Insufficient wallet balance" });
+      if (message === "LIVE_INVALID") return res.status(409).json({ success: false, message: "Invalid or ended LIVE recipient" });
+      if (message === "P2002" || (e as { code?: string })?.code === "P2002") {
+        const duplicate = await prisma.walletTransaction.findUnique({ where: { idempotencyKey }, select: { reference: true, amountKobo: true, description: true } });
+        if (duplicate?.amountKobo === -totalKobo && duplicate.description === `Sent ${quantity} ${gift.name}`) return res.json({ success: true, duplicate: true, reference: duplicate.reference, totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100, platformEarnNaira: platformEarnKobo / 100, gift: { name: gift.name, icon: gift.imageUrl } });
+        if (duplicate) return res.status(409).json({ success: false, message: "Idempotency key was already used for a different gift" });
+      }
+      console.error("LIVE gift transaction failed", e);
+      return res.status(500).json({ success: false, message: "Gift could not be sent" });
+    }
   });
   app.get("/api/wallet/banks", auth, async (_req: Request, res: Response) => {
     try { res.json({ success: true, banks: await ps("/bank?country=nigeria&perPage=100") }); }

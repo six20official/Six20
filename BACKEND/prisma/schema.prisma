@@ -1,6 +1,7 @@
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -35,7 +36,7 @@ model User {
   sentGifts           GiftTransaction[]    @relation("SentGifts")
   likes               Like[]
   liveSessions        LiveSession[]
-  liveChatMessages LiveChatMessage[]
+  liveChatMessages    LiveChatMessage[]
   liveViewers         LiveViewer[]
   receivedMessages    Message[]            @relation("ReceivedMessages")
   sentMessages        Message[]            @relation("SentMessages")
@@ -49,6 +50,11 @@ model User {
   videos              Video[]
   wallet              Wallet?
   walletTransactions  WalletTransaction[]
+  paymentTransactions PaymentTransaction[]
+  bankAccounts        BankAccount[]
+  withdrawals         Withdrawal[]
+  sentTransfers       WalletTransfer[]     @relation("SentTransfers")
+  receivedTransfers   WalletTransfer[]     @relation("ReceivedTransfers")
 }
 
 model CreatorProfile {
@@ -170,19 +176,19 @@ model Message {
 }
 
 model LiveSession {
-  id          Int          @id @default(autoincrement())
-  creatorId   Int
-  title       String
-  description String?
-  streamKey   String?
-  status      String       @default("scheduled")
-  viewerCount Int          @default(0)
-  likes       Int          @default(0)
-  startedAt   DateTime?
-  endedAt     DateTime?
-  createdAt   DateTime     @default(now())
-  creator     User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  viewers     LiveViewer[]
+  id           Int               @id @default(autoincrement())
+  creatorId    Int
+  title        String
+  description  String?
+  streamKey    String?
+  status       String            @default("scheduled")
+  viewerCount  Int               @default(0)
+  likes        Int               @default(0)
+  startedAt    DateTime?
+  endedAt      DateTime?
+  createdAt    DateTime          @default(now())
+  creator      User              @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  viewers      LiveViewer[]
   chatMessages LiveChatMessage[]
 }
 
@@ -198,45 +204,50 @@ model LiveViewer {
 }
 
 model Gift {
-  id            Int      @id @default(autoincrement())
-  name          String
-  slug          String   @unique
-  description   String?
-  category      String
-  imageUrl      String?
-  thumbnailUrl  String?
-  animationUrl  String?
-  priceCoins    Int
-  rarity        String   @default("common")
-  sortOrder     Int      @default(0)
-  isFeatured    Boolean  @default(false)
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  name         String
+  slug         String   @unique
+  description  String?
+  category     String
+  imageUrl     String?
+  thumbnailUrl String?
+  animationUrl String?
+  priceCoins   Int
+  priceKobo    Int      @default(0)
+  rarity       String   @default("common")
+  sortOrder    Int      @default(0)
+  isFeatured   Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   transactions GiftTransaction[]
 
   @@index([category])
   @@index([priceCoins])
+  @@index([priceKobo])
   @@index([rarity])
   @@index([isActive])
   @@index([isFeatured])
 }
 
 model GiftTransaction {
-  id            Int      @id @default(autoincrement())
-  senderId      Int
-  receiverId    Int
-  giftId        Int
-  quantity      Int      @default(1)
-  totalCoins    Int
-  creatorEarn   Int
-  platformEarn  Int
-  liveSessionId Int?
-  createdAt     DateTime @default(now())
-  gift          Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
-  receiver      User     @relation("ReceivedGifts", fields: [receiverId], references: [id], onDelete: Cascade)
-  sender        User     @relation("SentGifts", fields: [senderId], references: [id], onDelete: Cascade)
+  id               Int      @id @default(autoincrement())
+  senderId         Int
+  receiverId       Int
+  giftId           Int
+  quantity         Int      @default(1)
+  totalCoins       Int
+  creatorEarn      Int
+  platformEarn     Int
+  totalKobo        Int      @default(0)
+  creatorEarnKobo  Int      @default(0)
+  platformEarnKobo Int      @default(0)
+  liveSessionId    Int?
+  createdAt        DateTime @default(now())
+  gift             Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  receiver         User     @relation("ReceivedGifts", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender           User     @relation("SentGifts", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([senderId])
   @@index([receiverId])
@@ -245,29 +256,107 @@ model GiftTransaction {
 }
 
 model Wallet {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @unique
-  coins     Int      @default(0)
-  balance   Int      @default(0)
-  earnings  Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            Int      @id @default(autoincrement())
+  userId        Int      @unique
+  coins         Int      @default(0)
+  balance       Int      @default(0)
+  earnings      Int      @default(0)
+  availableKobo Int      @default(0)
+  earningsKobo  Int      @default(0)
+  pendingKobo   Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model WalletTransaction {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  type        String
-  amount      Int
-  description String?
-  reference   String?
-  status      String   @default("completed")
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                Int      @id @default(autoincrement())
+  userId            Int
+  type              String
+  amount            Int
+  amountKobo        Int      @default(0)
+  description       String?
+  reference         String?
+  providerReference String?
+  idempotencyKey    String?  @unique
+  status            String   @default("completed")
+  createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([createdAt])
+}
+
+model PaymentTransaction {
+  id                    String    @id @default(cuid())
+  userId                Int
+  reference             String    @unique
+  amountKobo            Int
+  currency              String    @default("NGN")
+  provider              String    @default("paystack")
+  status                String    @default("pending")
+  authorizationUrl      String?
+  providerTransactionId String?
+  paidAt                DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model BankAccount {
+  id            String       @id @default(cuid())
+  userId        Int
+  bankCode      String
+  bankName      String
+  accountName   String
+  accountLast4  String
+  recipientCode String       @unique
+  currency      String       @default("NGN")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  withdrawals   Withdrawal[]
+
+  @@index([userId])
+}
+
+model Withdrawal {
+  id                   String      @id @default(cuid())
+  userId               Int
+  bankAccountId        String
+  amountKobo           Int
+  feeKobo              Int         @default(0)
+  netKobo              Int
+  reference            String      @unique
+  recipientCode        String
+  providerTransferCode String?
+  status               String      @default("pending")
+  failureReason        String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount          BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+model WalletTransfer {
+  id         String   @id @default(cuid())
+  senderId   Int
+  receiverId Int
+  amountKobo Int
+  reference  String   @unique
+  status     String   @default("completed")
+  createdAt  DateTime @default(now())
+  sender     User     @relation("SentTransfers", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver   User     @relation("ReceivedTransfers", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@index([senderId, createdAt])
+  @@index([receiverId, createdAt])
 }
 
 model Store {
@@ -474,16 +563,15 @@ model SecurityEvent {
 }
 
 model LiveChatMessage {
-  id            Int         @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
   liveSessionId Int
   userId        Int
   text          String
-  createdAt     DateTime    @default(now())
+  createdAt     DateTime @default(now())
 
-  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, createdAt])
   @@index([userId, createdAt])
 }
-

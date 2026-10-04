@@ -14,6 +14,7 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import { registerLiveProductionRoutes } from "./live-production";
+import { registerWalletRoutes } from "./wallet-routes";
 
 // ======================================================
 // SIX20 BACKEND
@@ -24,14 +25,11 @@ const prisma = new PrismaClient();
 
 const PORT = Number(process.env.PORT || 4000);
 
-const JWT_SECRET =
-  process.env.JWT_SECRET?.trim();
-
-if (!JWT_SECRET || JWT_SECRET.length < 32) {
-  throw new Error(
-    "JWT_SECRET must be configured and at least 32 characters long."
-  );
-}
+const JWT_SECRET: string = (() => {
+  const secret = process.env.JWT_SECRET?.trim();
+  if (!secret || secret.length < 32) throw new Error("JWT_SECRET must be configured and at least 32 characters long.");
+  return secret;
+})();
 
 const FRONTEND_URL =
   process.env.FRONTEND_URL || "http://localhost:3000";
@@ -64,6 +62,7 @@ app.use(
 app.use(
   express.json({
     limit: "10mb",
+    verify: (req, _res, buffer) => { (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer); },
   })
 );
 
@@ -104,6 +103,8 @@ const giftLimiter = rateLimit({
     error: "Too many gift requests. Please slow down.",
   },
 });
+
+const financialLimiter = rateLimit({ windowMs: 60 * 1000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false });
 
 // ======================================================
 // MULTER
@@ -210,13 +211,10 @@ function requireAuth(
 
     const token = parts[1];
 
-    const decoded =
-      jwt.verify(
-        token,
-        JWT_SECRET
-      ) as {
-        userId: number;
-      };
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (typeof decoded === "string" || typeof decoded.userId !== "number") {
+      return res.status(401).json({ success: false, error: "Invalid token payload" });
+    }
 
     req.userId =
       Number(decoded.userId);
@@ -242,6 +240,8 @@ function requireAuth(
     });
   }
 }
+
+registerWalletRoutes(app, prisma, requireAuth);
 
 async function requireAdmin(
   req: AuthenticatedRequest,
@@ -2484,7 +2484,7 @@ app.get(
                 "asc",
             },
             {
-              priceCoins:
+              priceKobo:
                 "asc",
             },
           ],
@@ -2494,7 +2494,7 @@ app.get(
         success: true,
         count:
           gifts.length,
-        gifts,
+        gifts: gifts.map(({ priceCoins: _legacyPrice, priceKobo, ...gift }) => ({ ...gift, priceNaira: priceKobo / 100 })),
       });
     } catch (error) {
       console.error(
@@ -2610,7 +2610,7 @@ app.get(
 
       return res.json({
         success: true,
-        gift,
+        gift: (({ priceCoins: _legacyPrice, priceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: priceKobo / 100 }))(gift),
       });
     } catch (error) {
       console.error(
@@ -2648,7 +2648,8 @@ app.post(
         imageUrl,
         thumbnailUrl,
         animationUrl,
-        priceCoins,
+        priceNaira,
+        priceKobo,
         category =
           "six20-originals",
         rarity =
@@ -2658,7 +2659,7 @@ app.post(
           false,
       } = req.body;
 
-      if (!name || !priceCoins) {
+      if (!name || (priceNaira === undefined && priceKobo === undefined)) {
         return res.status(400).json({
           success: false,
           message:
@@ -2677,15 +2678,8 @@ app.post(
         });
       }
 
-      const coins =
-        Number(priceCoins);
-
-      if (
-        !Number.isFinite(
-          coins
-        ) ||
-        coins <= 0
-      ) {
+      const parsedKobo = priceKobo !== undefined ? Number(priceKobo) : Math.round(Number(priceNaira) * 100);
+      if (!Number.isSafeInteger(parsedKobo) || parsedKobo <= 0) {
         return res.status(400).json({
           success: false,
           message:
@@ -2717,8 +2711,7 @@ app.post(
           success: false,
           message:
             "A gift with this name already exists",
-          gift:
-            existing,
+          gift: (({ priceCoins: _legacyPrice, priceKobo: existingPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: existingPriceKobo / 100 }))(existing),
         });
       }
 
@@ -2764,8 +2757,8 @@ app.post(
                 ? animationUrl.trim()
                 : null,
 
-            priceCoins:
-              Math.floor(coins),
+            priceCoins: 0,
+            priceKobo: parsedKobo,
 
             rarity:
               typeof rarity ===
@@ -2799,7 +2792,7 @@ app.post(
         success: true,
         message:
           "Gift created successfully",
-        gift,
+        gift: (({ priceCoins: _legacyPrice, priceKobo: giftPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: giftPriceKobo / 100 }))(gift),
       });
     } catch (error: any) {
       console.error(
@@ -2887,526 +2880,10 @@ app.get(
 );
 
 // ------------------------------------------------------
-// SEND GIFT
-// ------------------------------------------------------
+// Gift sending is registered in wallet-routes.ts.
 
-app.post(
-  "/api/gifts/send",
-  giftLimiter,
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      const senderId =
-        req.userId;
+// Wallet read endpoints are registered in wallet-routes.ts.
 
-      if (!senderId) {
-        return res.status(401).json({
-          success: false,
-          message:
-            "Authentication required",
-        });
-      }
-
-      const {
-        receiverId,
-        giftId,
-        quantity = 1,
-        liveSessionId,
-      } = req.body;
-
-      const parsedReceiverId =
-        Number(
-          receiverId
-        );
-
-      const parsedGiftId =
-        Number(
-          giftId
-        );
-
-      const parsedQuantity =
-        Number(
-          quantity
-        );
-
-      const parsedLiveSessionId =
-        liveSessionId !==
-          undefined &&
-        liveSessionId !==
-          null
-          ? Number(
-              liveSessionId
-            )
-          : null;
-
-      if (
-        !Number.isInteger(
-          parsedReceiverId
-        ) ||
-        !Number.isInteger(
-          parsedGiftId
-        ) ||
-        !Number.isInteger(
-          parsedQuantity
-        ) ||
-        parsedQuantity <= 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid gift request",
-        });
-      }
-
-      if (
-        parsedReceiverId ===
-        senderId
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "You cannot send a gift to yourself",
-        });
-      }
-
-      const gift =
-        await prisma.gift.findUnique({
-          where: {
-            id:
-              parsedGiftId,
-          },
-        });
-
-      if (
-        !gift ||
-        !gift.isActive
-      ) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Gift not found",
-        });
-      }
-
-      const receiver =
-        await prisma.user.findUnique({
-          where: {
-            id:
-              parsedReceiverId,
-          },
-        });
-
-      if (!receiver) {
-        return res.status(404).json({
-          success: false,
-          message:
-            "Receiver not found",
-        });
-      }
-
-      if (
-        parsedLiveSessionId !==
-        null
-      ) {
-        const live =
-          await prisma.liveSession.findUnique({
-            where: {
-              id:
-                parsedLiveSessionId,
-            },
-          });
-
-        if (!live) {
-          return res.status(404).json({
-            success: false,
-            message:
-              "Livestream not found",
-          });
-        }
-
-        if (
-          live.status !==
-          "live"
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Livestream is not currently live",
-          });
-        }
-
-        if (
-          live.creatorId !==
-          parsedReceiverId
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Receiver is not the creator of this livestream",
-          });
-        }
-      }
-
-      const totalCoins =
-        gift.priceCoins *
-        parsedQuantity;
-
-      // SIX20 70/30 MODEL
-      const creatorEarn =
-        Math.floor(
-          totalCoins * 0.7
-        );
-
-      const platformEarn =
-        totalCoins -
-        creatorEarn;
-
-      const result =
-        await prisma.$transaction(
-          async (tx) => {
-            await tx.wallet.upsert({
-              where: {
-                userId:
-                  senderId,
-              },
-
-              update: {},
-
-              create: {
-                userId:
-                  senderId,
-              },
-            });
-
-            const debit =
-              await tx.wallet.updateMany({
-                where: {
-                  userId:
-                    senderId,
-                  coins: {
-                    gte:
-                      totalCoins,
-                  },
-                },
-
-                data: {
-                  coins: {
-                    decrement:
-                      totalCoins,
-                  },
-                },
-              });
-
-            if (debit.count !== 1) {
-              throw new Error(
-                "INSUFFICIENT_COINS"
-              );
-            }
-
-            const receiverWallet =
-              await tx.wallet.upsert({
-                where: {
-                  userId:
-                    parsedReceiverId,
-                },
-
-                update: {
-                  earnings: {
-                    increment:
-                      creatorEarn,
-                  },
-
-                  balance: {
-                    increment:
-                      creatorEarn,
-                  },
-                },
-
-                create: {
-                  userId:
-                    parsedReceiverId,
-
-                  earnings:
-                    creatorEarn,
-
-                  balance:
-                    creatorEarn,
-                },
-              });
-
-            const transaction =
-              await tx.giftTransaction.create({
-                data: {
-                  senderId,
-
-                  receiverId:
-                    parsedReceiverId,
-
-                  giftId:
-                    parsedGiftId,
-
-                  quantity:
-                    parsedQuantity,
-
-                  totalCoins,
-
-                  creatorEarn,
-
-                  platformEarn,
-
-                  liveSessionId:
-                    parsedLiveSessionId,
-                },
-              });
-
-            await tx.walletTransaction.create({
-              data: {
-                userId:
-                  senderId,
-
-                type:
-                  "gift_sent",
-
-                amount:
-                  -totalCoins,
-
-                description:
-                  `Sent ${parsedQuantity} ${gift.name}`,
-
-                reference:
-                  `gift:${transaction.id}`,
-
-                status:
-                  "completed",
-              },
-            });
-
-            await tx.walletTransaction.create({
-              data: {
-                userId:
-                  parsedReceiverId,
-
-                type:
-                  "gift_received",
-
-                amount:
-                  creatorEarn,
-
-                description:
-                  `Received ${parsedQuantity} ${gift.name}`,
-
-                reference:
-                  `gift:${transaction.id}`,
-
-                status:
-                  "completed",
-              },
-            });
-
-            return {
-              updatedSenderWallet,
-              receiverWallet,
-              transaction,
-            };
-          }
-        );
-
-      return res.status(201).json({
-        success: true,
-
-        message:
-          "Gift sent successfully",
-
-        totalCoins,
-
-        creatorEarn,
-
-        platformEarn,
-
-        transaction:
-          result.transaction,
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "INSUFFICIENT_COINS"
-      ) {
-        const wallet =
-          await prisma.wallet.findUnique({
-            where: {
-              userId: senderId,
-            },
-            select: {
-              coins: true,
-            },
-          });
-
-        return res.status(400).json({
-          success: false,
-          message: "Insufficient coins",
-          requiredCoins: totalCoins,
-          availableCoins: wallet?.coins ?? 0,
-        });
-      }
-
-      console.error(
-        "SEND GIFT ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to send gift",
-      });
-    }
-  }
-);
-
-// ------------------------------------------------------
-// WALLET TRANSACTIONS
-// ------------------------------------------------------
-
-app.get(
-  "/api/wallet/transactions",
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      const userId =
-        req.userId;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message:
-            "Authentication required",
-        });
-      }
-
-      const transactions =
-        await prisma.walletTransaction.findMany({
-          where: {
-            userId,
-          },
-
-          orderBy: {
-            createdAt:
-              "desc",
-          },
-
-          take: 100,
-        });
-
-      return res.json({
-        success: true,
-        transactions,
-      });
-    } catch (error) {
-      console.error(
-        "WALLET TRANSACTIONS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch wallet transactions",
-      });
-    }
-  }
-);
-
-// ------------------------------------------------------
-// CREATOR EARNINGS
-// ------------------------------------------------------
-
-app.get(
-  "/api/wallet/earnings",
-  requireAuth,
-  async (
-    req: AuthenticatedRequest,
-    res: Response
-  ) => {
-    try {
-      const userId =
-        req.userId;
-
-      if (!userId) {
-        return res.status(401).json({
-          success: false,
-          message:
-            "Authentication required",
-        });
-      }
-
-      const wallet =
-        await prisma.wallet.upsert({
-          where: {
-            userId,
-          },
-
-          update: {},
-
-          create: {
-            userId,
-          },
-        });
-
-      const giftStats =
-        await prisma.giftTransaction.aggregate({
-          where: {
-            receiverId:
-              userId,
-          },
-
-          _sum: {
-            creatorEarn:
-              true,
-
-            totalCoins:
-              true,
-          },
-        });
-
-      return res.json({
-        success: true,
-
-        wallet,
-
-        giftStats: {
-          totalGiftCoins:
-            giftStats._sum
-              .totalCoins ??
-            0,
-
-          creatorEarnings:
-            giftStats._sum
-              .creatorEarn ??
-            0,
-        },
-      });
-    } catch (error) {
-      console.error(
-        "WALLET EARNINGS ERROR:",
-        error
-      );
-
-      return res.status(500).json({
-        success: false,
-        message:
-          "Failed to fetch earnings",
-      });
-    }
-  }
-);
-
-// ======================================================
 // 404
 // ======================================================
 

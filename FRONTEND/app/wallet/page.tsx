@@ -1,273 +1,71 @@
-﻿"use client";
+"use client";
 
-import { useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import FeatureShell, { Card, btn, ghost } from "../../components/FeatureShell";
+import { apiFetch } from "../../lib/api";
+
+type Wallet = { availableKobo: number; earningsKobo: number; pendingKobo: number };
+type Bank = { name: string; code: string };
+type Account = { id: string; bankName: string; accountName: string; accountLast4: string };
+type Tx = { id: number; type: string; amountKobo: number; description?: string; status: string; createdAt: string };
+const naira = (kobo = 0) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN" }).format(kobo / 100);
+const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("six20-token") || ""}` });
 
 export default function Page() {
-  const [coins, setCoins] = useState(2500);
-  const [message, setMessage] = useState("");
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [banks, setBanks] = useState<Bank[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [transactions, setTransactions] = useState<Tx[]>([]);
+  const [fundAmount, setFundAmount] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [username, setUsername] = useState("");
+  const [bankCode, setBankCode] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [withdrawAccount, setWithdrawAccount] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
 
-  const addCoins = () => {
-    setCoins((current) => current + 500);
-    setMessage("500 SIX20 Coins added to your demo balance.");
-  };
+  async function refresh() {
+    const headers = auth();
+    const [w, t, a, b] = await Promise.all([
+      apiFetch("/api/wallet", { headers }), apiFetch("/api/wallet/transactions", { headers }),
+      apiFetch("/api/wallet/bank-accounts", { headers }), apiFetch("/api/wallet/banks", { headers }),
+    ]);
+    setWallet(w.wallet); setTransactions(t.transactions || []); setAccounts(a.accounts || []); setBanks(b.banks || []);
+  }
+  useEffect(() => { const hasToken = Boolean(localStorage.getItem("six20-token")); setSignedIn(hasToken); if (hasToken) refresh().catch(e => setNotice(e.message)); }, []);
+  useEffect(() => {
+    const reference = new URLSearchParams(window.location.search).get("reference");
+    if (!reference || !localStorage.getItem("six20-token")) return;
+    apiFetch("/api/wallet/fund/verify", { method: "POST", headers: auth(), body: JSON.stringify({ reference }) })
+      .then(() => { setNotice("Your payment was verified and your balance was updated."); return refresh(); })
+      .catch(e => setNotice(e instanceof Error ? e.message : "Payment verification failed"));
+  }, []);
 
-  const withdraw = () => {
-    setMessage(
-      "Withdrawal will be available after wallet and payment integration."
-    );
-  };
+  async function submit(event: FormEvent, endpoint: string, body: object, redirect = false) {
+    event.preventDefault(); setBusy(true); setNotice("");
+    try {
+      const result = await apiFetch(endpoint, { method: "POST", headers: auth(), body: JSON.stringify(body) });
+      if (redirect && result.authorizationUrl) { window.location.assign(result.authorizationUrl); return; }
+      setNotice("Request completed successfully."); await refresh();
+    } catch (e) { setNotice(e instanceof Error ? e.message : "Request failed"); }
+    finally { setBusy(false); }
+  }
 
-  return (
-    <FeatureShell
-      title="Wallet"
-      subtitle="Manage your SIX20 Coins, rewards and creator earnings."
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "repeat(auto-fit, minmax(220px, 1fr))",
-          gap: 16,
-        }}
-      >
-        <Card>
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 14,
-            }}
-          >
-            SIX20 Coin Balance
-          </p>
-
-          <h2
-            style={{
-              margin: "8px 0 4px",
-              fontSize: 34,
-              fontWeight: 900,
-            }}
-          >
-            {coins.toLocaleString()}
-          </h2>
-
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 13,
-            }}
-          >
-            Demo balance
-          </p>
-        </Card>
-
-        <Card>
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 14,
-            }}
-          >
-            Creator Earnings
-          </p>
-
-          <h2
-            style={{
-              margin: "8px 0 4px",
-              fontSize: 34,
-              fontWeight: 900,
-            }}
-          >
-            ₦0
-          </h2>
-
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 13,
-            }}
-          >
-            Available earnings
-          </p>
-        </Card>
-
-        <Card>
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 14,
-            }}
-          >
-            Affiliate Rewards
-          </p>
-
-          <h2
-            style={{
-              margin: "8px 0 4px",
-              fontSize: 34,
-              fontWeight: 900,
-            }}
-          >
-            ₦0
-          </h2>
-
-          <p
-            style={{
-              margin: 0,
-              color: "#756F80",
-              fontSize: 13,
-            }}
-          >
-            Referral earnings
-          </p>
-        </Card>
-      </div>
-
-      <Card className="mt-5">
-        <h2
-          style={{
-            margin: "0 0 6px",
-            fontSize: 22,
-            fontWeight: 900,
-          }}
-        >
-          Wallet Actions
-        </h2>
-
-        <p
-          style={{
-            margin: "0 0 16px",
-            color: "#756F80",
-            fontSize: 14,
-          }}
-        >
-          Test the SIX20 wallet experience before connecting
-          real payments and payouts.
-        </p>
-
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-          }}
-        >
-          <button
-            type="button"
-            style={btn}
-            onClick={addCoins}
-          >
-            Add 500 Coins
-          </button>
-
-          <button
-            type="button"
-            style={ghost}
-            onClick={withdraw}
-          >
-            Withdraw
-          </button>
-        </div>
-
-        {message && (
-          <div
-            style={{
-              marginTop: 16,
-              padding: 14,
-              borderRadius: 14,
-              background: "#F7F4FF",
-              color: "#17132F",
-              fontSize: 14,
-            }}
-          >
-            {message}
-          </div>
-        )}
-      </Card>
-
-      <Card className="mt-5">
-        <h2
-          style={{
-            margin: "0 0 14px",
-            fontSize: 22,
-            fontWeight: 900,
-          }}
-        >
-          SIX20 Rewards
-        </h2>
-
-        <div
-          style={{
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 14,
-              background: "#FFF4EF",
-            }}
-          >
-            <strong>Live rewards</strong>
-            <p
-              style={{
-                margin: "4px 0 0",
-                color: "#756F80",
-                fontSize: 14,
-              }}
-            >
-              Earn through eligible live activities and
-              community engagement.
-            </p>
-          </div>
-
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 14,
-              background: "#F4F8FF",
-            }}
-          >
-            <strong>Affiliate rewards</strong>
-            <p
-              style={{
-                margin: "4px 0 0",
-                color: "#756F80",
-                fontSize: 14,
-              }}
-            >
-              Build your network and earn from eligible
-              referrals.
-            </p>
-          </div>
-
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 14,
-              background: "#F7F4FF",
-            }}
-          >
-            <strong>Game rewards</strong>
-            <p
-              style={{
-                margin: "4px 0 0",
-                color: "#756F80",
-                fontSize: 14,
-              }}
-            >
-              Participate in SIX20 games and community
-              challenges.
-            </p>
-          </div>
-        </div>
-      </Card>
-    </FeatureShell>
-  );
+  return <FeatureShell title="Wallet" subtitle="Manage your Naira balance, earnings and payouts.">
+    {!signedIn && <Card>Sign in to view and manage your wallet.</Card>}
+    {wallet && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16 }}>
+      {[["Available Balance", wallet.availableKobo], ["Creator Earnings", wallet.earningsKobo], ["Pending", wallet.pendingKobo]].map(([label, value]) => <Card key={String(label)}><p style={{ margin: 0, color: "#756F80" }}>{label}</p><h2 style={{ margin: "8px 0", fontSize: 30, fontWeight: 900 }}>{naira(Number(value))}</h2></Card>)}
+    </div>}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 16, marginTop: 16 }}>
+      <Card><h2>Add Money</h2><form onSubmit={e => submit(e, "/api/wallet/fund", { amountNaira: Number(fundAmount) }, true)}><label>Amount (₦)<input required min="100" step="0.01" type="number" value={fundAmount} onChange={e => setFundAmount(e.target.value)} /></label><button style={btn} disabled={busy}>Continue to Paystack</button></form></Card>
+      <Card><h2>Send Money</h2><form onSubmit={e => submit(e, "/api/wallet/transfer", { receiverUsername: username, amountNaira: Number(sendAmount) })}><label>Recipient username<input required value={username} onChange={e => setUsername(e.target.value)} /></label><label>Amount (₦)<input required min="0.01" step="0.01" type="number" value={sendAmount} onChange={e => setSendAmount(e.target.value)} /></label><button style={btn} disabled={busy}>Send Money</button></form></Card>
+      <Card><h2>Verify Bank Account</h2><form onSubmit={e => submit(e, "/api/wallet/bank-account", { bankCode, accountNumber })}><label>Bank<select required value={bankCode} onChange={e => setBankCode(e.target.value)}><option value="">Select a bank</option>{banks.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}</select></label><label>Account number<input required maxLength={10} inputMode="numeric" value={accountNumber} onChange={e => setAccountNumber(e.target.value.replace(/\D/g, ""))} /></label><button style={btn} disabled={busy}>Verify and Save</button></form></Card>
+      <Card><h2>Withdraw</h2><form onSubmit={e => submit(e, "/api/wallet/withdraw", { bankAccountId: withdrawAccount, amountNaira: Number(withdrawAmount) })}><label>Saved bank account<select required value={withdrawAccount} onChange={e => setWithdrawAccount(e.target.value)}><option value="">Select an account</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.bankName} ••••{a.accountLast4} ({a.accountName})</option>)}</select></label><label>Amount (₦)<input required min="50" step="0.01" type="number" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} /></label><button style={ghost} disabled={busy}>Withdraw</button></form></Card>
+    </div>
+    {notice && <Card className="mt-4">{notice}</Card>}
+    <Card className="mt-5"><h2>Transaction History</h2>{transactions.length ? transactions.map(t => <div key={t.id} style={{ display: "flex", justifyContent: "space-between", gap: 16, borderTop: "1px solid #eee", padding: "12px 0" }}><div><strong>{t.description || t.type}</strong><div style={{ color: "#756F80", fontSize: 13 }}>{new Date(t.createdAt).toLocaleString("en-NG")} · {t.status}</div></div><strong>{naira(t.amountKobo)}</strong></div>) : <p>No transactions yet.</p>}</Card>
+  </FeatureShell>;
 }

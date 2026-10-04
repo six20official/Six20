@@ -43,7 +43,7 @@ export default function Page() {
   return (
     <FeatureShell
       title="Games"
-      subtitle="Play quick community games, challenge friends and earn SIX20 Coins."
+      subtitle="Play quick community games, challenge friends and track your high scores."
     >
       <Card>
         <div style={{ color: "#756F80", marginBottom: 8 }}>

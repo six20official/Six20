@@ -25,6 +25,14 @@ async function ps(path: string, init: RequestInit = {}) {
 }
 const id = (req: Request) => Number((req as Request & { userId?: number }).userId);
 const limit = rateLimit({ windowMs: 60_000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false });
+async function broadcastGift(liveSessionId: number, event: Record<string, unknown>) {
+  const url = process.env.LIVEKIT_URL?.trim(), apiKey = process.env.LIVEKIT_API_KEY?.trim(), secret = process.env.LIVEKIT_API_SECRET?.trim();
+  if (!url || !apiKey || !secret) return;
+  try {
+    const { RoomServiceClient } = await import("livekit-server-sdk");
+    await new RoomServiceClient(url, apiKey, secret).sendData(`six20-live-${liveSessionId}`, Buffer.from(JSON.stringify(event)), 0);
+  } catch (error) { console.error("LIVE gift broadcast failed:", error); }
+}
 
 export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: Auth) {
   app.post("/api/payments/paystack/webhook", async (req: Request, res: Response) => {
@@ -153,6 +161,7 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
         ] });
         return giftTx;
       });
+      await broadcastGift(liveSessionId, { type: "live.gift", id: reference, giftName: gift.name, giftIcon: gift.imageUrl, quantity, senderUsername: (await prisma.user.findUnique({ where: { id: senderId }, select: { username: true } }))?.username || "viewer", totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100 });
       res.status(201).json({ success: true, reference, totalNaira: totalKobo / 100, creatorEarnNaira: creatorEarnKobo / 100, platformEarnNaira: platformEarnKobo / 100, gift: { name: gift.name, icon: gift.imageUrl }, sender: { username: (await prisma.user.findUnique({ where: { id: senderId }, select: { username: true } }))?.username }, creator: { username: receiver.username }, createdAt: new Date().toISOString() });
     } catch (e) {
       const message = e instanceof Error ? e.message : "";

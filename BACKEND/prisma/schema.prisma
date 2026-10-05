@@ -38,6 +38,7 @@ model User {
   liveSessions        LiveSession[]
   liveChatMessages    LiveChatMessage[]
   liveViewers         LiveViewer[]
+  liveBlocks          LiveUserBlock[]
   receivedMessages    Message[]            @relation("ReceivedMessages")
   sentMessages        Message[]            @relation("SentMessages")
   notifications       Notification[]
@@ -184,12 +185,14 @@ model LiveSession {
   status       String            @default("scheduled")
   viewerCount  Int               @default(0)
   likes        Int               @default(0)
+  slowModeSeconds Int            @default(0)
   startedAt    DateTime?
   endedAt      DateTime?
   createdAt    DateTime          @default(now())
   creator      User              @relation(fields: [creatorId], references: [id], onDelete: Cascade)
   viewers      LiveViewer[]
   chatMessages LiveChatMessage[]
+  userBlocks   LiveUserBlock[]
 }
 
 model LiveViewer {
@@ -198,6 +201,7 @@ model LiveViewer {
   userId        Int
   joinedAt      DateTime    @default(now())
   lastSeenAt    DateTime    @default(dbgenerated("'1970-01-01T00:00:00.000Z'"))
+  mutedUntil    DateTime?
   user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
 
@@ -570,10 +574,23 @@ model LiveChatMessage {
   userId        Int
   text          String
   createdAt     DateTime @default(now())
+  deletedAt     DateTime?
+  isPinned      Boolean  @default(false)
 
   liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, createdAt])
   @@index([userId, createdAt])
+}
+
+model LiveUserBlock {
+  id            Int         @id @default(autoincrement())
+  liveSessionId Int
+  userId        Int
+  createdAt     DateTime    @default(now())
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([liveSessionId, userId])
 }

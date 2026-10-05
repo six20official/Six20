@@ -15,7 +15,7 @@ import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import { registerLiveProductionRoutes } from "./live-production";
 import { registerWalletRoutes } from "./wallet-routes";
-
+import { registerLiveKitRoutes } from "./livekit-routes";
 // ======================================================
 // SIX20 BACKEND
 // ======================================================
@@ -1890,15 +1890,19 @@ app.post(
         chat: { endpoint: `/api/live/${live.id}/chat` },
       });
     } catch (error) {
-      console.error(
-        "CREATE LIVE ERROR:",
-        error
-      );
+      console.error("========================================");
+      console.error("CREATE LIVE ERROR:");
+      console.error(error);
+      console.error("========================================");
 
       return res.status(500).json({
         success: false,
-        message:
-          "Failed to create livestream",
+        message: error instanceof Error
+          ? error.message
+          : String(error),
+        error: error instanceof Error
+          ? error.stack
+          : String(error),
       });
     }
   }
@@ -2329,6 +2333,11 @@ app.post(
           message:
             "This livestream is not currently live",
         });
+      }
+
+      if (live.creatorId !== userId) {
+        const blocked = await prisma.liveUserBlock.findUnique({ where: { liveSessionId_userId: { liveSessionId: liveId, userId } } });
+        if (blocked) return res.status(403).json({ success: false, message: "You are blocked from this LIVE" });
       }
 
       if (live.creatorId === userId) return res.json({ success: true, live, viewerCount: live.viewerCount });
@@ -2955,7 +2964,7 @@ app.get(
 // Wallet read endpoints are registered in wallet-routes.ts.
 
 registerLiveProductionRoutes(app, prisma, requireAuth);
-
+registerLiveKitRoutes(app, prisma, requireAuth);
 // 404
 // ======================================================
 

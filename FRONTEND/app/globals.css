@@ -539,3 +539,7 @@ a {
   12% { opacity: 1; }
   100% { opacity: 0; transform: translateY(-320px) scale(1.12); }
 }
+
+@keyframes gift-arrive { 0% { opacity: 0; transform: translate(-50%, 32px) scale(.76); } 100% { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+@keyframes gift-particle { 0% { opacity: 0; transform: translateY(26px) rotate(0deg) scale(.4); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-120px) rotate(170deg) scale(1.1); } }
+@keyframes gift-flash { 0%,100% { opacity: 0; } 35% { opacity: .75; } }

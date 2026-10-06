@@ -1,6 +1,9 @@
 ﻿import { Express, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import rateLimit from "express-rate-limit";
+import { publishLiveEvent } from "./live-events";
+import { formatNairaFromKobo } from "./paystack-config";
+import { contributeBattleScore } from "./live-interactive";
 
 type AuthRequest = Request & {
   userId?: number;
@@ -21,20 +24,17 @@ const presenceLimit = rateLimit({
   standardHeaders: "draft-8",
   legacyHeaders: false,
 });
+const chatReadLimit = rateLimit({
+  windowMs: 10_000,
+  limit: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+});
 const reactionLimit = rateLimit({ windowMs: 5_000, limit: 4, standardHeaders: "draft-8", legacyHeaders: false });
 
-async function broadcastLive(liveSessionId: number, event: Record<string, unknown>) {
-  const url = process.env.LIVEKIT_URL?.trim();
-  const key = process.env.LIVEKIT_API_KEY?.trim();
-  const secret = process.env.LIVEKIT_API_SECRET?.trim();
-  if (!url || !key || !secret) return;
-  try {
-    const { RoomServiceClient } = await import("livekit-server-sdk");
-    const service = new RoomServiceClient(url, key, secret);
-    await service.sendData(`six20-live-${liveSessionId}`, Buffer.from(JSON.stringify(event)), 0);
-  } catch (error) {
-    console.error("LIVE data broadcast failed:", error);
-  }
+async function safePublishLiveEvent(...args: Parameters<typeof publishLiveEvent>) {
+  try { return await publishLiveEvent(...args); }
+  catch (error) { console.error("LIVE room event could not be delivered:", error); return null; }
 }
 
 const cleanStale = (
@@ -146,7 +146,7 @@ export function registerLiveProductionRoutes(
 
         if (session.creatorId !== req.userId) {
           const blocked = await prisma.liveUserBlock.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId: req.userId! } } });
-          if (blocked) return res.status(403).json({ message: "You are blocked from this LIVE" });
+          if (blocked?.isBanned || (blocked?.removedUntil && blocked.removedUntil > new Date())) return res.status(403).json({ message: "You are blocked from this LIVE" });
         }
 
         // -----------------------------------------------------
@@ -357,6 +357,7 @@ export function registerLiveProductionRoutes(
 
   app.get(
     "/api/live/:id/chat",
+    chatReadLimit,
     requireAuth,
     async (req: Request, res: Response) => {
       try {
@@ -509,8 +510,16 @@ export function registerLiveProductionRoutes(
           });
         }
 
+        if (!session.chatEnabled && req.userId !== session.creatorId) return res.status(403).json({ message: "Chat is disabled for this LIVE" });
+
+        if (session.creatorId !== req.userId) {
+          const presence = await prisma.liveViewer.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId: req.userId } }, select: { lastSeenAt: true } });
+          if (!presence || presence.lastSeenAt < new Date(Date.now() - staleAfterMs)) return res.status(403).json({ message: "Join this LIVE before chatting" });
+        }
+
         const blocked = await prisma.liveUserBlock.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId: req.userId } } });
-        if (blocked) return res.status(403).json({ message: "You are blocked from this LIVE" });
+        if (blocked?.isBanned || (blocked?.removedUntil && blocked.removedUntil > new Date())) return res.status(403).json({ message: "You cannot chat in this LIVE" });
+        if (blocked?.mutedUntil && blocked.mutedUntil > new Date()) return res.status(403).json({ message: "You are muted in this LIVE" });
         const viewerState = await prisma.liveViewer.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId: req.userId } } });
         if (viewerState?.mutedUntil && viewerState.mutedUntil > new Date()) return res.status(403).json({ message: "You are muted in this LIVE" });
         if (session.slowModeSeconds > 0) {
@@ -537,7 +546,7 @@ export function registerLiveProductionRoutes(
             },
           });
 
-        await broadcastLive(liveSessionId, { type: "chat.message", message });
+        await safePublishLiveEvent(liveSessionId, "live.chat", { message }, req.userId);
 
         return res.status(201).json({
           success: true,
@@ -559,6 +568,62 @@ export function registerLiveProductionRoutes(
     }
   );
 
+  app.get("/api/live/:id/moderation/users", requireAuth, async (req: AuthRequest, res: Response) => {
+    const liveSessionId = Number(req.params.id);
+    if (!req.userId) return res.sendStatus(401);
+    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { creatorId: true } });
+    if (!session) return res.sendStatus(404);
+    if (session.creatorId !== req.userId) return res.status(403).json({ message: "Only the creator can view moderation tools" });
+    const [viewers, banned] = await Promise.all([
+      prisma.liveViewer.findMany({ where: { liveSessionId, lastSeenAt: { gte: new Date(Date.now() - staleAfterMs) } }, include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true } } }, orderBy: { joinedAt: "asc" } }),
+      prisma.liveUserBlock.findMany({ where: { liveSessionId, isBanned: true }, include: { user: { select: { id: true, username: true, displayName: true, avatarUrl: true } } } }),
+    ]);
+    return res.json({ success: true, viewers: viewers.map(({ user, joinedAt, mutedUntil }) => ({ user, joinedAt, muted: Boolean(mutedUntil && mutedUntil > new Date()), role: "viewer" })), bannedUsers: banned.map(({ user }) => user) });
+  });
+
+  app.get("/api/live/:id/moderation/settings", requireAuth, async (req: AuthRequest, res: Response) => {
+    const liveSessionId = Number(req.params.id);
+    if (!req.userId) return res.sendStatus(401);
+    const settings = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { creatorId: true, chatEnabled: true, reactionsEnabled: true, giftsEnabled: true, slowModeSeconds: true } });
+    if (!settings) return res.sendStatus(404);
+    if (settings.creatorId !== req.userId) return res.status(403).json({ message: "Only the creator can view moderation settings" });
+    return res.json({ success: true, settings: { chatEnabled: settings.chatEnabled, reactionsEnabled: settings.reactionsEnabled, giftsEnabled: settings.giftsEnabled, slowModeSeconds: settings.slowModeSeconds } });
+  });
+
+  app.get("/api/live/:id/leaderboard", requireAuth, async (req: AuthRequest, res: Response) => {
+    const liveSessionId = Number(req.params.id);
+    if (!req.userId) return res.sendStatus(401);
+    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { id: true } });
+    if (!session) return res.sendStatus(404);
+    const rows = await prisma.giftTransaction.groupBy({ by: ["senderId"], where: { liveSessionId }, _sum: { totalKobo: true }, orderBy: { _sum: { totalKobo: "desc" } }, take: 10 });
+    const supporters = await Promise.all(rows.map(async (row) => ({ userId: row.senderId, totalKobo: row._sum.totalKobo || 0n, username: (await prisma.user.findUnique({ where: { id: row.senderId }, select: { username: true } }))?.username || "viewer" })));
+    return res.json({ success: true, supporters });
+  });
+
+  app.get("/api/live/:id/goal", requireAuth, async (req: AuthRequest, res: Response) => {
+    const liveSessionId = Number(req.params.id);
+    if (!req.userId) return res.sendStatus(401);
+    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { creatorId: true, goalTitle: true, goalTargetKobo: true } });
+    if (!session) return res.sendStatus(404);
+    const raised = await prisma.giftTransaction.aggregate({ where: { liveSessionId }, _sum: { totalKobo: true } });
+    return res.json({ success: true, goal: { title: session.goalTitle, targetKobo: session.goalTargetKobo, raisedKobo: raised._sum.totalKobo || 0n } });
+  });
+
+  app.post("/api/live/:id/goal", requireAuth, async (req: AuthRequest, res: Response) => {
+    const liveSessionId = Number(req.params.id), title = String(req.body?.title || "").trim(), targetKobo = Number(req.body?.targetKobo);
+    if (!req.userId) return res.sendStatus(401);
+    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { creatorId: true, status: true } });
+    if (!session) return res.sendStatus(404);
+    if (session.creatorId !== req.userId) return res.status(403).json({ message: "Only the creator can set a LIVE goal" });
+    if (session.status !== "live") return res.status(409).json({ message: "LIVE is not active" });
+    if (!title || title.length > 100 || !Number.isSafeInteger(targetKobo) || targetKobo < 100 || targetKobo > 10_000_000_000) return res.status(400).json({ message: "Enter a goal title and target between ₦1 and ₦100,000,000" });
+    await prisma.liveSession.update({ where: { id: liveSessionId }, data: { goalTitle: title, goalTargetKobo: BigInt(targetKobo) } });
+    const aggregate = await prisma.giftTransaction.aggregate({ where: { liveSessionId }, _sum: { totalKobo: true } });
+    const payload = { title, targetKobo: BigInt(targetKobo), raisedKobo: aggregate._sum.totalKobo || 0n };
+    await safePublishLiveEvent(liveSessionId, "live.goal.update", payload, req.userId);
+    return res.json({ success: true, goal: payload });
+  });
+
   app.post("/api/live/:id/moderation/:action", requireAuth, async (req: AuthRequest, res: Response) => {
     const liveSessionId = Number(req.params.id), action = String(req.params.action), actorId = req.userId;
     if (!actorId) return res.sendStatus(401);
@@ -574,12 +639,21 @@ export function registerLiveProductionRoutes(
           await prisma.liveChatMessage.updateMany({ where: { liveSessionId }, data: { isPinned: false } });
           await prisma.liveChatMessage.updateMany({ where: { id: messageId, liveSessionId, deletedAt: null }, data: { isPinned: true } });
         }
-        await broadcastLive(liveSessionId, { type: "chat.moderation", action, messageId });
-      } else if (action === "mute" || action === "remove" || action === "block") {
+        await safePublishLiveEvent(liveSessionId, "live.moderation", { action, messageId }, actorId);
+      } else if (["mute", "remove", "block", "ban", "unban"].includes(action)) {
         if (!Number.isSafeInteger(targetUserId) || targetUserId < 1 || targetUserId === session.creatorId) return res.status(400).json({ message: "Invalid user" });
-        if (action === "mute") await prisma.liveViewer.updateMany({ where: { liveSessionId, userId: targetUserId }, data: { mutedUntil: new Date(Date.now() + 10 * 60_000) } });
-        if (action === "remove" || action === "block") {
-          if (action === "block") await prisma.liveUserBlock.upsert({ where: { liveSessionId_userId: { liveSessionId, userId: targetUserId } }, update: {}, create: { liveSessionId, userId: targetUserId } });
+        const where = { liveSessionId_userId: { liveSessionId, userId: targetUserId } };
+        if (action === "mute") {
+          const mutedUntil = new Date(Date.now() + 10 * 60_000);
+          await prisma.liveUserBlock.upsert({ where, update: { mutedUntil }, create: { liveSessionId, userId: targetUserId, mutedUntil } });
+        }
+        if (action === "unban") await prisma.liveUserBlock.updateMany({ where: { liveSessionId, userId: targetUserId }, data: { isBanned: false, removedUntil: null } });
+        if (action === "remove" || action === "block" || action === "ban") {
+          if (action === "block" || action === "ban") await prisma.liveUserBlock.upsert({ where, update: { isBanned: true, removedUntil: null }, create: { liveSessionId, userId: targetUserId, isBanned: true } });
+          if (action === "remove") {
+            const removedUntil = new Date(Date.now() + 60_000);
+            await prisma.liveUserBlock.upsert({ where, update: { removedUntil }, create: { liveSessionId, userId: targetUserId, removedUntil } });
+          }
           await prisma.liveViewer.deleteMany({ where: { liveSessionId, userId: targetUserId } });
           try {
             const { RoomServiceClient } = await import("livekit-server-sdk");
@@ -587,11 +661,17 @@ export function registerLiveProductionRoutes(
             if (url && key && secret) await new RoomServiceClient(url, key, secret).removeParticipant(`six20-live-${liveSessionId}`, `user-${targetUserId}`);
           } catch (e) { console.warn("Could not remove LIVE participant:", e); }
         }
-        await broadcastLive(liveSessionId, { type: "chat.moderation", action, userId: targetUserId });
+        await safePublishLiveEvent(liveSessionId, "live.moderation", { action, userId: targetUserId }, actorId);
+      } else if (["chat", "reactions", "gifts"].includes(action)) {
+        if (typeof req.body?.enabled !== "boolean") return res.status(400).json({ message: "enabled must be a boolean" });
+        const field = action === "chat" ? "chatEnabled" : action === "reactions" ? "reactionsEnabled" : "giftsEnabled";
+        await prisma.liveSession.update({ where: { id: liveSessionId }, data: { [field]: req.body.enabled } });
+        await safePublishLiveEvent(liveSessionId, "live.moderation", { action, enabled: req.body.enabled }, actorId);
       } else if (action === "slow-mode") {
         const seconds = Number(req.body?.seconds);
         if (!Number.isInteger(seconds) || seconds < 0 || seconds > 60) return res.status(400).json({ message: "Slow mode must be 0 to 60 seconds" });
         await prisma.liveSession.update({ where: { id: liveSessionId }, data: { slowModeSeconds: seconds } });
+        await safePublishLiveEvent(liveSessionId, "live.moderation", { action, seconds }, actorId);
       } else return res.status(404).json({ message: "Unknown moderation action" });
       return res.json({ success: true });
     } catch (error) { console.error("LIVE moderation failed:", error); return res.status(500).json({ message: "Moderation action failed" }); }
@@ -604,14 +684,18 @@ export function registerLiveProductionRoutes(
     const emoji = String(req.body?.emoji || "");
     if (!userId) return res.sendStatus(401);
     if (!Number.isSafeInteger(liveSessionId) || liveSessionId < 1 || !allowed.includes(emoji)) return res.status(400).json({ message: "Invalid reaction" });
-    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { status: true, creatorId: true } });
+    const session = await prisma.liveSession.findUnique({ where: { id: liveSessionId }, select: { status: true, creatorId: true, reactionsEnabled: true } });
     if (!session || session.status !== "live") return res.status(409).json({ message: "LIVE is not active" });
+    if (!session.reactionsEnabled) return res.status(403).json({ message: "Reactions are disabled for this LIVE" });
     if (session.creatorId !== userId) {
       const present = await prisma.liveViewer.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId } } });
       if (!present || present.lastSeenAt < new Date(Date.now() - staleAfterMs)) return res.status(403).json({ message: "Join this LIVE to react" });
+      const restriction = await prisma.liveUserBlock.findUnique({ where: { liveSessionId_userId: { liveSessionId, userId } }, select: { isBanned: true, removedUntil: true } });
+      if (restriction?.isBanned || (restriction?.removedUntil && restriction.removedUntil > new Date())) return res.status(403).json({ message: "You cannot react in this LIVE" });
     }
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
-    await broadcastLive(liveSessionId, { type: "live.reaction", emoji, username: user?.username || "viewer", id: crypto.randomUUID() });
+    await contributeBattleScore(prisma, liveSessionId, "reaction", 1, userId);
+    await safePublishLiveEvent(liveSessionId, "live.reaction", { emoji, username: user?.username || "viewer" }, userId, true);
     return res.json({ success: true });
   });
 
@@ -723,10 +807,10 @@ export function registerLiveProductionRoutes(
                 event.receiver.username,
 
               totalNaira:
-                event.totalKobo / 100,
+                formatNairaFromKobo(event.totalKobo),
 
               creatorEarnNaira:
-                event.creatorEarnKobo / 100,
+                formatNairaFromKobo(event.creatorEarnKobo),
 
               timestamp:
                 event.createdAt,

@@ -1,0 +1,143 @@
+PAYSTACK CONFIGURATION: **FAIL** — Both keys are set in \`BACKEND/.env\`, but neither has a recognized Paystack Test or Live prefix. \`.env\` is ignored by Git and not tracked. The backend loads environment variables; the public key is unused by the hosted-checkout flow. The active backend process’s inherited environment could not be inspected; \`NODE_ENV\` is unset in the local \`.env\` configuration.
+
+PAYMENT INITIALIZATION: **FAIL** — Authenticated endpoint, ₦100 minimum, integer kobo conversion, NGN, and UUID reference are present. The current configured secret prevents the development-mode provider call. No production callback URL is configured.
+
+PAYMENT VERIFICATION: **PASS** — By code inspection, the backend looks up the recorded reference, checks authenticated user ownership, provider status, amount, currency, and reference. The frontend submits a reference; it cannot declare payment success. No successful provider verification was run.
+
+WEBHOOK: **PASS** — \`POST /api/payments/paystack/webhook\` exists, uses raw request bytes, handles \`charge.success\`, verifies the transaction with Paystack, and acknowledges unknown or already settled references. Successful provider delivery was not tested.
+
+SIGNATURE VERIFICATION: **PASS** — By code inspection, \`x-paystack-signature\` is checked with HMAC SHA-512 using the secret and a timing-safe comparison. No live Paystack webhook was sent.
+
+IDEMPOTENCY: **PASS** for preventing duplicate credit to one payment, by code inspection. The conditional payment status update and wallet/ledger writes are in one database transaction; repeated callbacks and verification for that reference should not credit twice. **FAIL** for request-level initialization and withdrawal idempotency: retries can create separate transactions with new references. No concurrent settlement test was run.
+
+WALLET LEDGER: **FAIL** — Settlement records payment, wallet ledger, and balance atomically using integer kobo. However, kobo balance fields use Prisma \`Int\`, which limits an individual balance to about ₦21.47 million. Repeated funding or earnings can exceed that range. No successful funding ledger entry was tested.
+
+GIFT PURCHASE: **PASS** by code inspection for server-side catalog pricing, conditional wallet debit, gift transaction, and gift idempotency. **UNTESTED** end-to-end. LiveKit gift, goal, and leaderboard events are best-effort after the transaction and have no durable retry mechanism.
+
+CREATOR EARNINGS: **FAIL** — The implemented split is 70% creator and remainder platform, but the calculation uses floating-point multiplication (\`Math.floor(totalKobo * 0.70)\`). It can round down by one kobo for some valid totals. No gift settlement was tested.
+
+WITHDRAWALS: **FAIL** — Authentication, bank-account ownership, balance reservation, pending state, and signed transfer status handling exist. There is no request-level idempotency or reconciliation process for ambiguous/persistently pending withdrawals. The current Paystack configuration also blocks provider calls in development. No transfer was tested.
+
+TRANSACTION HISTORY: **PASS** by code inspection — the authenticated endpoint reads wallet ledger entries, including funding, gifts, creator credits, and withdrawals where recorded. No new payment transaction was created for this audit.
+
+SECURITY: **FAIL** — Secret exposure checks passed: no frontend Paystack secret reference was found, and \`BACKEND/.env\` is ignored and untracked. Development rejects a non-Test secret, but production skips prefix validation, so it does not require a Live secret or matching key pair. Authentication, route rate limits, amount checks, and webhook signature validation are present.
+
+DATABASE: **PASS** — Prisma schema validates; migration status reports 12 migrations and an up-to-date database. \`BACKEND/src/server.ts\` resolves \`file:./dev.db\` to \`BACKEND/prisma/dev.db\`; Prisma migration status resolves the schema-relative URL to the same file. The running health endpoint reports the database connected.
+
+BACKEND BUILD: **PASS** — \`npm run build\`.
+
+FRONTEND BUILD: **PASS** — \`npm run build\`.
+
+RUNTIME: **PASS** — \`http://localhost:4000/api/health\` reports the API online and database connected. No real-money or provider transaction requests were made.
+
+DUPLICATE/LEGACY CODE: **PASS** for duplicate Paystack/payment endpoints: one Paystack implementation was found. **FAIL** for wallet cleanup: a later legacy \`GET /api/wallet\` route is shadowed by the earlier registered handler, and the schema retains legacy wallet fields alongside the kobo fields.
+
+## CRITICAL BLOCKERS
+
+**BLOCKER:** Current configured Paystack keys have unrecognized prefixes.  
+**WHY IT PREVENTS PRODUCTION:** The development guard blocks provider calls; these credentials cannot establish a tested checkout. No successful Paystack Test Mode transaction or settlement has been verified.  
+**SEVERITY:** CRITICAL  
+**FILE:** \`BACKEND/.env:9,11\`; \`BACKEND/src/wallet-routes.ts:20-25\`  
+**LINE OR FUNCTION:** \`key()\` and \`ps()\`  
+**CURRENT BEHAVIOR:** Both variables exist, but neither is recognized as Test or Live mode.  
+**REQUIRED FIX:** Configure valid Test Mode keys, complete the end-to-end payment/webhook tests, and configure valid Live keys for production. Keep their values private.
+
+## HIGH BLOCKERS
+
+**BLOCKER:** Production does not enforce Live key mode or matching key pairs.  
+**WHY IT PREVENTS PRODUCTION:** When \`NODE_ENV === "production"\`, the current prefix guard is skipped; test or malformed credentials can be used.  
+**SEVERITY:** HIGH  
+**FILE:** \`BACKEND/src/wallet-routes.ts:21-25\`  
+**LINE OR FUNCTION:** \`ps()\`  
+**CURRENT BEHAVIOR:** Only non-production mode checks for \`sk_test_\`; production accepts any configured secret.  
+**REQUIRED FIX:** Validate exact mode-specific secret/public prefixes and matching key modes at startup; reject invalid production configuration.
+
+**BLOCKER:** Wallet and payment kobo amounts use Prisma \`Int\`.  
+**WHY IT PREVENTS PRODUCTION:** Accumulated wallet funding or creator earnings can exceed the signed 32-bit kobo range and cause later credits to fail.  
+**SEVERITY:** HIGH  
+**FILE:** \`BACKEND/prisma/schema.prisma:346-382\`  
+**LINE OR FUNCTION:** \`Wallet.availableKobo\`, \`Wallet.earningsKobo\`, and payment/ledger amount fields  
+**CURRENT BEHAVIOR:** Monetary values are stored as \`Int\`.  
+**REQUIRED FIX:** Define supported balance limits or adopt a wider integer representation with a safe additive migration and matching application changes.
+
+## MEDIUM BLOCKERS
+
+**BLOCKER:** Funding initialization has no request idempotency key.  
+**WHY IT PREVENTS PRODUCTION:** Retried initialization requests generate new references and can create multiple payable checkouts for one user action.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:89-99\`  
+**LINE OR FUNCTION:** \`POST /api/wallet/fund\`  
+**CURRENT BEHAVIOR:** Each request generates a fresh UUID reference.  
+**REQUIRED FIX:** Accept an idempotency key and return the existing pending payment for repeated requests.
+
+**BLOCKER:** Withdrawal requests have no request idempotency or reconciliation path.  
+**WHY IT PREVENTS PRODUCTION:** Retries can create distinct transfer requests; ambiguous or missing provider callbacks can leave funds reserved indefinitely.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:239-264\`  
+**LINE OR FUNCTION:** \`POST /api/wallet/withdraw\`  
+**CURRENT BEHAVIOR:** Every request creates a fresh reference; ambiguous outcomes remain pending.  
+**REQUIRED FIX:** Add stable request idempotency and a provider reconciliation process for pending transfers.
+
+**BLOCKER:** No explicit Paystack callback URL is configured.  
+**WHY IT PREVENTS PRODUCTION:** Initialization sends no callback URL and depends on Paystack dashboard defaults, while the frontend expects callback parameters.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:96\`; \`BACKEND/.env.example:5\`  
+**LINE OR FUNCTION:** Funding initialization  
+**CURRENT BEHAVIOR:** \`PAYSTACK_CALLBACK_URL\` is absent from the current environment; the example value points to localhost.  
+**REQUIRED FIX:** Configure the deployed wallet callback URL and verify success, failure, and cancellation returns in Test Mode.
+
+**BLOCKER:** Current CORS configuration is local-only.  
+**WHY IT PREVENTS PRODUCTION:** The configured frontend origin is localhost; a hosted frontend cannot call the API if this configuration is deployed unchanged.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/.env:3\`; \`BACKEND/src/server.ts:42-65\`  
+**LINE OR FUNCTION:** \`FRONTEND_URL\` and CORS middleware  
+**CURRENT BEHAVIOR:** CORS allows the single configured origin.  
+**REQUIRED FIX:** Set the deployed frontend origin in production and verify browser requests from that origin.
+
+**BLOCKER:** Creator revenue uses floating-point arithmetic.  
+**WHY IT PREVENTS PRODUCTION:** \`Math.floor(totalKobo * 0.70)\` can under-credit creator earnings by one kobo for some totals.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:161\`  
+**LINE OR FUNCTION:** Gift earnings calculation  
+**CURRENT BEHAVIOR:** The percentage share is computed with a floating-point multiplier.  
+**REQUIRED FIX:** Calculate the share using integer numerator/denominator arithmetic and explicitly define rounding.
+
+**BLOCKER:** LIVE gift event delivery is best-effort only.  
+**WHY IT PREVENTS PRODUCTION:** A LiveKit publishing failure after the wallet transaction commits can lose the gift animation and related goal/leaderboard updates; retries return the existing purchase.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:35-37,189-203\`  
+**LINE OR FUNCTION:** \`bestEffortLiveBroadcast()\` and gift post-transaction events  
+**CURRENT BEHAVIOR:** Failures are logged without durable retry.  
+**REQUIRED FIX:** Persist events in a transactional outbox and retry delivery independently.
+
+**BLOCKER:** Payment refunds/disputes are not reconciled.  
+**WHY IT PREVENTS PRODUCTION:** A later refund or dispute is not handled by the charge-success webhook path, so wallet funds may remain credited after reversal.  
+**SEVERITY:** MEDIUM  
+**FILE:** \`BACKEND/src/wallet-routes.ts:52-71\`  
+**LINE OR FUNCTION:** Paystack webhook event handling  
+**CURRENT BEHAVIOR:** Handles \`charge.success\` and transfer events, but no payment refund/dispute events.  
+**REQUIRED FIX:** Define and implement signed refund/dispute accounting, including cases where credited funds have already been spent.
+
+## LOW BLOCKERS
+
+**BLOCKER:** A shadowed legacy wallet route and legacy wallet fields remain.  
+**WHY IT PREVENTS PRODUCTION:** The duplicate route is not currently the active balance reader, but it creates ambiguity about the canonical wallet API and balance fields.  
+**SEVERITY:** LOW  
+**FILE:** \`BACKEND/src/server.ts:260,3010-3014\`; \`BACKEND/prisma/schema.prisma:346-356\`  
+**LINE OR FUNCTION:** Wallet route registration and legacy wallet model fields  
+**CURRENT BEHAVIOR:** The earlier registered wallet handler responds before the later legacy handler.  
+**REQUIRED FIX:** Retire the shadowed route and document the kobo fields as canonical in a separately reviewed cleanup.
+
+## UNTESTED ITEMS
+
+- Successful Test Mode initialization, checkout, verification, and wallet credit.
+- Valid Paystack webhook delivery, provider retries, and concurrent settlement under real provider responses.
+- Runtime wallet funding, gift purchase, creator earnings, and withdrawal.
+- Refund/dispute and ambiguous-transfer reconciliation.
+- Visual mobile and desktop wallet behavior.
+- Active backend process environment values; OS access did not permit inspection of its process environment.
+- No real-money transaction was attempted.
+
+PAYSTACK PRODUCTION READINESS:
+NOT READY
+

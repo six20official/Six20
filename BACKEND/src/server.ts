@@ -14,14 +14,28 @@ import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import { registerLiveProductionRoutes } from "./live-production";
+import { registerLiveInteractiveRoutes } from "./live-interactive";
 import { registerWalletRoutes } from "./wallet-routes";
-import { registerLiveKitRoutes } from "./livekit-routes";
+import { publishLiveEvent } from "./live-events";
+import { GIFT_CATALOG, GIFT_CATEGORIES } from "./gift-catalog";
+import { formatNairaFromKobo, parseNairaToKobo, validatePaystackConfig } from "./paystack-config";
 // ======================================================
 // SIX20 BACKEND
 // ======================================================
 
 const app = express();
-const prisma = new PrismaClient();
+app.set("json replacer", (_key: string, value: unknown) => {
+  if (typeof value !== "bigint") return value;
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) && value >= BigInt(Number.MIN_SAFE_INTEGER) ? Number(value) : value.toString();
+});
+const paymentConfig = validatePaystackConfig(process.env);
+const configuredDatabaseUrl = process.env.DATABASE_URL?.trim();
+const prismaDatabaseUrl = configuredDatabaseUrl === "file:./dev.db"
+  ? `file:${path.resolve(__dirname, "../prisma/dev.db").replace(/\\/g, "/")}`
+  : configuredDatabaseUrl;
+const prisma = new PrismaClient(
+  prismaDatabaseUrl ? { datasources: { db: { url: prismaDatabaseUrl } } } : undefined
+);
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -31,8 +45,7 @@ const JWT_SECRET: string = (() => {
   return secret;
 })();
 
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "http://localhost:3000";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
 
 const uploadDir = path.resolve(
   process.env.UPLOAD_DIR || "./uploads"
@@ -249,7 +262,7 @@ function requireAuth(
   }
 }
 
-registerWalletRoutes(app, prisma, requireAuth);
+registerWalletRoutes(app, prisma, requireAuth, paymentConfig);
 
 async function requireAdmin(
   req: AuthenticatedRequest,
@@ -360,9 +373,7 @@ app.get(
     res: Response
   ) => {
     try {
-      await prisma.$queryRaw`
-        SELECT 1
-      `;
+      await prisma.liveSession.count();
 
       return res.json({
         success: true,
@@ -2337,11 +2348,12 @@ app.post(
 
       if (live.creatorId !== userId) {
         const blocked = await prisma.liveUserBlock.findUnique({ where: { liveSessionId_userId: { liveSessionId: liveId, userId } } });
-        if (blocked) return res.status(403).json({ success: false, message: "You are blocked from this LIVE" });
+        if (blocked?.isBanned || (blocked?.removedUntil && blocked.removedUntil > new Date())) return res.status(403).json({ success: false, message: "You are blocked from this LIVE" });
       }
 
       if (live.creatorId === userId) return res.json({ success: true, live, viewerCount: live.viewerCount });
 
+      const wasPresent = await prisma.liveViewer.findUnique({ where: { liveSessionId_userId: { liveSessionId: liveId, userId } }, select: { id: true, lastSeenAt: true } });
       await prisma.liveViewer.upsert({
         where: {
           liveSessionId_userId: {
@@ -2385,6 +2397,12 @@ app.post(
             viewerCount,
           },
         });
+
+      if (!wasPresent || wasPresent.lastSeenAt < cutoff) {
+        const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+        try { await publishLiveEvent(liveId, "live.viewer.join", { userId, username: viewer?.username || "viewer", viewerCount }, userId); }
+        catch (error) { console.error("LIVE join event broadcast failed:", error); }
+      }
 
       return res.json({
         success: true,
@@ -2441,7 +2459,7 @@ app.post(
         });
       }
 
-      await prisma.liveViewer.deleteMany({
+      const removed = await prisma.liveViewer.deleteMany({
         where: {
           liveSessionId:
             liveId,
@@ -2458,6 +2476,12 @@ app.post(
             lastSeenAt: { gte: cutoff },
           },
         });
+
+      if (removed.count && liveId > 0) {
+        const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
+        try { await publishLiveEvent(liveId, "live.viewer.leave", { userId, username: viewer?.username || "viewer", viewerCount }, userId); }
+        catch (error) { console.error("LIVE leave event broadcast failed:", error); }
+      }
 
       const live =
         await prisma.liveSession.update({
@@ -2514,18 +2538,30 @@ app.get(
 
       const where: any = {
         isActive: true,
+        priceKobo: { gte: 20_000n },
+        OR: [
+          { licenseStatus: "ORIGINAL_FAN" },
+          { licenseStatus: "ACTIVE", OR: [{ licenseExpiry: null }, { licenseExpiry: { gt: new Date() } }] },
+        ],
       };
 
-      if (category) {
+      if (category === "TRENDING") {
+        where.isFeatured = true;
+      } else if (category) {
         where.category =
           category;
       }
+
+      const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 80) : "";
+      if (search) where.AND = [{ OR: [{ name: { contains: search } }, { description: { contains: search } }] }];
 
       const gifts =
         await prisma.gift.findMany({
           where,
 
-          orderBy: [
+          orderBy: req.query.sort === "popular"
+            ? [{ isFeatured: "desc" }, { sortOrder: "asc" }, { priceKobo: "asc" }]
+            : [
             {
               sortOrder:
                 "asc",
@@ -2537,11 +2573,24 @@ app.get(
           ],
         });
 
+      if (req.query.sort === "popular" || req.query.sort === "recent") {
+        const order = await prisma.giftTransaction.groupBy({
+          by: ["giftId"],
+          _sum: { quantity: true },
+          _max: { createdAt: true },
+        });
+        order.sort((a, b) => req.query.sort === "recent"
+          ? (b._max.createdAt?.getTime() || 0) - (a._max.createdAt?.getTime() || 0)
+          : (b._sum.quantity || 0) - (a._sum.quantity || 0));
+        const rank = new Map(order.map((row, index) => [row.giftId, index]));
+        gifts.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+      }
+
       return res.json({
         success: true,
         count:
           gifts.length,
-        gifts: gifts.map(({ priceCoins: _legacyPrice, priceKobo, ...gift }) => ({ ...gift, priceNaira: priceKobo / 100 })),
+        gifts: gifts.map(({ priceCoins: _legacyPrice, priceKobo, ...gift }) => ({ ...gift, priceNaira: formatNairaFromKobo(priceKobo) })),
       });
     } catch (error) {
       console.error(
@@ -2597,7 +2646,7 @@ app.get(
 
       return res.json({
         success: true,
-        categories,
+        categories: [...new Set([...GIFT_CATEGORIES, ...categories])],
       });
     } catch (error) {
       console.error(
@@ -2613,6 +2662,29 @@ app.get(
     }
   }
 );
+
+app.post("/api/gifts/catalog/seed", giftLimiter, requireAuth, requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    let created = 0;
+    for (const entry of GIFT_CATALOG) {
+      const slug = entry.name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+      const data = {
+        name: entry.name, slug, description: entry.description, category: entry.category,
+        priceCoins: 0, priceKobo: BigInt(entry.priceNaira) * 100n, rarity: entry.rarity,
+        sortOrder: entry.priceNaira, isFeatured: entry.rarity === "legendary" || entry.category === "PREMIUM",
+        isActive: true, country: entry.country, sport: entry.sport, brand: entry.brand,
+        team: entry.team, licenseStatus: entry.licenseStatus, assetSource: entry.assetSource,
+      };
+      const existing = await prisma.gift.findUnique({ where: { slug }, select: { id: true } });
+      await prisma.gift.upsert({ where: { slug }, create: data, update: data });
+      if (!existing) created += 1;
+    }
+    return res.status(201).json({ success: true, created, total: GIFT_CATALOG.length });
+  } catch (error) {
+    console.error("GIFT CATALOG SEED ERROR:", error);
+    return res.status(500).json({ success: false, message: "Could not initialize gift catalogue" });
+  }
+});
 
 // ------------------------------------------------------
 // GET SINGLE GIFT
@@ -2637,10 +2709,15 @@ app.get(
       }
 
       const gift =
-        await prisma.gift.findUnique({
+        await prisma.gift.findFirst({
           where: {
-            id:
-              giftId,
+            id: giftId,
+            isActive: true,
+            priceKobo: { gte: 20_000n },
+            OR: [
+              { licenseStatus: "ORIGINAL_FAN" },
+              { licenseStatus: "ACTIVE", OR: [{ licenseExpiry: null }, { licenseExpiry: { gt: new Date() } }] },
+            ],
           },
         });
 
@@ -2657,7 +2734,7 @@ app.get(
 
       return res.json({
         success: true,
-        gift: (({ priceCoins: _legacyPrice, priceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: priceKobo / 100 }))(gift),
+        gift: (({ priceCoins: _legacyPrice, priceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: formatNairaFromKobo(priceKobo) }))(gift),
       });
     } catch (error) {
       console.error(
@@ -2697,6 +2774,13 @@ app.post(
         animationUrl,
         priceNaira,
         priceKobo,
+        brand,
+        team,
+        sport,
+        country,
+        licenseStatus,
+        licenseExpiry,
+        assetSource,
         category =
           "six20-originals",
         rarity =
@@ -2725,14 +2809,18 @@ app.post(
         });
       }
 
-      const parsedKobo = priceKobo !== undefined ? Number(priceKobo) : Math.round(Number(priceNaira) * 100);
-      if (!Number.isSafeInteger(parsedKobo) || parsedKobo <= 0) {
+      const parsedKobo = priceKobo !== undefined && /^\d+$/.test(String(priceKobo)) ? BigInt(priceKobo) : parseNairaToKobo(priceNaira, 20_000_000);
+      if (parsedKobo === null || parsedKobo < 20_000n || parsedKobo > 2_000_000_000n) {
         return res.status(400).json({
           success: false,
           message:
-            "Gift price must be greater than 0",
+            "Gift price must be at least ₦200 and within the supported range",
         });
       }
+      const parsedLicenseStatus = licenseStatus === undefined ? "ORIGINAL_FAN" : String(licenseStatus);
+      if (!["ORIGINAL_FAN", "PENDING", "ACTIVE", "EXPIRED"].includes(parsedLicenseStatus)) return res.status(400).json({ success: false, message: "Invalid license status" });
+      const parsedLicenseExpiry = licenseExpiry ? new Date(String(licenseExpiry)) : null;
+      if (licenseExpiry && Number.isNaN(parsedLicenseExpiry?.getTime())) return res.status(400).json({ success: false, message: "Invalid license expiry" });
 
       const slug =
         giftName
@@ -2758,7 +2846,7 @@ app.post(
           success: false,
           message:
             "A gift with this name already exists",
-          gift: (({ priceCoins: _legacyPrice, priceKobo: existingPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: existingPriceKobo / 100 }))(existing),
+          gift: (({ priceCoins: _legacyPrice, priceKobo: existingPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: formatNairaFromKobo(existingPriceKobo) }))(existing),
         });
       }
 
@@ -2832,6 +2920,13 @@ app.post(
 
             isActive:
               true,
+            brand: typeof brand === "string" ? brand.trim().slice(0, 120) : null,
+            team: typeof team === "string" ? team.trim().slice(0, 120) : null,
+            sport: typeof sport === "string" ? sport.trim().slice(0, 80) : null,
+            country: typeof country === "string" ? country.trim().slice(0, 80) : null,
+            licenseStatus: parsedLicenseStatus,
+            licenseExpiry: parsedLicenseExpiry,
+            assetSource: typeof assetSource === "string" ? assetSource.trim().slice(0, 160) : null,
           },
         });
 
@@ -2839,7 +2934,7 @@ app.post(
         success: true,
         message:
           "Gift created successfully",
-        gift: (({ priceCoins: _legacyPrice, priceKobo: giftPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: giftPriceKobo / 100 }))(gift),
+        gift: (({ priceCoins: _legacyPrice, priceKobo: giftPriceKobo, ...safeGift }) => ({ ...safeGift, priceNaira: formatNairaFromKobo(giftPriceKobo) }))(gift),
       });
     } catch (error: any) {
       console.error(
@@ -2884,19 +2979,32 @@ app.patch("/api/gifts/:id", giftLimiter, requireAuth, requireAdmin, async (req: 
       data.name = name;
     }
     if (req.body?.priceKobo !== undefined || req.body?.priceNaira !== undefined) {
-      const kobo = req.body.priceKobo !== undefined ? Number(req.body.priceKobo) : Math.round(Number(req.body.priceNaira) * 100);
-      if (!Number.isSafeInteger(kobo) || kobo <= 0 || kobo > 2_000_000_000) return res.status(400).json({ success: false, message: "Gift price must be a valid positive NGN amount" });
+      const kobo = req.body.priceKobo !== undefined && /^\d+$/.test(String(req.body.priceKobo)) ? BigInt(req.body.priceKobo) : parseNairaToKobo(req.body.priceNaira, 20_000_000);
+      if (kobo === null || kobo < 20_000n || kobo > 2_000_000_000n) return res.status(400).json({ success: false, message: "Gift price must be at least ₦200 and within the supported range" });
       data.priceKobo = kobo;
     }
     if (req.body?.isActive !== undefined) {
       if (typeof req.body.isActive !== "boolean") return res.status(400).json({ success: false, message: "isActive must be a boolean" });
       data.isActive = req.body.isActive;
     }
+    for (const field of ["brand", "team", "sport", "country", "assetSource"] as const) {
+      if (req.body?.[field] !== undefined) data[field] = typeof req.body[field] === "string" ? req.body[field].trim().slice(0, 160) || null : null;
+    }
+    if (req.body?.licenseStatus !== undefined) {
+      const status = String(req.body.licenseStatus);
+      if (!["ORIGINAL_FAN", "PENDING", "ACTIVE", "EXPIRED"].includes(status)) return res.status(400).json({ success: false, message: "Invalid license status" });
+      data.licenseStatus = status;
+    }
+    if (req.body?.licenseExpiry !== undefined) {
+      const expiry = req.body.licenseExpiry ? new Date(String(req.body.licenseExpiry)) : null;
+      if (expiry && Number.isNaN(expiry.getTime())) return res.status(400).json({ success: false, message: "Invalid license expiry" });
+      data.licenseExpiry = expiry;
+    }
     if (req.body?.imageUrl !== undefined) data.imageUrl = typeof req.body.imageUrl === "string" ? req.body.imageUrl.trim().slice(0, 2048) || null : null;
     if (!Object.keys(data).length) return res.status(400).json({ success: false, message: "No supported gift changes provided" });
     const gift = await prisma.gift.update({ where: { id: giftId }, data });
-    const { priceCoins: _legacyPrice, ...safeGift } = gift;
-    return res.json({ success: true, gift: safeGift });
+    const { priceCoins: _legacyPrice, priceKobo, ...safeGift } = gift;
+    return res.json({ success: true, gift: { ...safeGift, priceNaira: formatNairaFromKobo(priceKobo) } });
   } catch (error) {
     console.error("UPDATE GIFT ERROR:", error);
     return res.status(500).json({ success: false, message: "Could not update gift" });
@@ -2964,7 +3072,7 @@ app.get(
 // Wallet read endpoints are registered in wallet-routes.ts.
 
 registerLiveProductionRoutes(app, prisma, requireAuth);
-registerLiveKitRoutes(app, prisma, requireAuth);
+registerLiveInteractiveRoutes(app, prisma, requireAuth);
 // 404
 // ======================================================
 
@@ -3065,6 +3173,7 @@ async function startServer() {
     process.exit(1);
   }
 }
+
 
 // ======================================================
 // SHUTDOWN

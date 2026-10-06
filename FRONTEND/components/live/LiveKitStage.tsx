@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LiveKitRoom,
   RoomAudioRenderer,
@@ -30,6 +30,7 @@ import {
   Wifi,
 } from "lucide-react";
 import { apiFetch } from "../../lib/api";
+import GiftOverlay, { type LiveGiftEffect } from "./GiftOverlay";
 
 type LiveKitStageProps = {
   liveId: number;
@@ -38,6 +39,11 @@ type LiveKitStageProps = {
   onChatMessage?: (message: any) => void;
   onGiftEvent?: (gift: any) => void;
   onChatModeration?: (event: any) => void;
+  onGoalEvent?: (event: any) => void;
+  onLeaderboardEvent?: (event: any) => void;
+  onReactionEvent?: (event: any) => void;
+  onRealtimeEvent?: (event: any) => void;
+  onReconnect?: () => void;
 };
 
 type TokenResponse = {
@@ -192,35 +198,78 @@ function LiveVideoSurface({
   onChatMessage,
   onGiftEvent,
   onChatModeration,
+  onGoalEvent,
+  onLeaderboardEvent,
+  onReactionEvent,
+  onRealtimeEvent,
+  onReconnect,
 }: {
   isCreator: boolean;
   onFullscreen: () => void;
   onChatMessage?: (message: any) => void;
   onGiftEvent?: (gift: any) => void;
   onChatModeration?: (event: any) => void;
+  onGoalEvent?: (event: any) => void;
+  onLeaderboardEvent?: (event: any) => void;
+  onReactionEvent?: (event: any) => void;
+  onRealtimeEvent?: (event: any) => void;
+  onReconnect?: () => void;
 }) {
   const room = useRoomContext();
-  const [effects, setEffects] = useState<Array<{ id: string; emoji: string; kind: string; text?: string }>>([]);
+  const [effects, setEffects] = useState<Array<{ id: string; emoji: string }>>([]);
+  const [giftQueue, setGiftQueue] = useState<LiveGiftEffect[]>([]);
+  const [activeGift, setActiveGift] = useState<LiveGiftEffect | null>(null);
+  const effectTimers = useRef<Map<string, number>>(new Map());
+  const activeGiftRef = useRef<LiveGiftEffect | null>(null);
+  const callbacks = useRef({ onChatMessage, onGiftEvent, onChatModeration, onGoalEvent, onLeaderboardEvent, onReactionEvent, onRealtimeEvent, onReconnect });
+  activeGiftRef.current = activeGift;
+  callbacks.current = { onChatMessage, onGiftEvent, onChatModeration, onGoalEvent, onLeaderboardEvent, onReactionEvent, onRealtimeEvent, onReconnect };
+  const clearActiveGift = useCallback(() => setActiveGift(null), []);
+
+  useEffect(() => {
+    if (!activeGift && giftQueue.length) {
+      setActiveGift(giftQueue[0]);
+      setGiftQueue((queue) => queue.slice(1));
+    }
+  }, [activeGift, giftQueue]);
+
   useEffect(() => {
     const receive = (payload: Uint8Array) => {
       try {
-        const event = JSON.parse(new TextDecoder().decode(payload));
-        if (event.type === "chat.message") onChatMessage?.(event.message);
-        if (event.type === "chat.moderation") onChatModeration?.(event);
+        const envelope = JSON.parse(new TextDecoder().decode(payload));
+        if (envelope?.version !== 1 || typeof envelope.type !== "string") return;
+        const event = { ...(envelope.payload || {}), type: envelope.type, id: envelope.eventId, timestamp: envelope.timestamp };
+        callbacks.current.onRealtimeEvent?.(event);
+        if (event.type === "live.chat") callbacks.current.onChatMessage?.(event.message);
+        if (event.type === "live.moderation") callbacks.current.onChatModeration?.(event);
         if (event.type === "live.gift") {
-          onGiftEvent?.(event);
-          setEffects((items) => [...items, { id: event.id, emoji: "🎁", kind: "gift", text: `@${event.senderUsername} sent ${event.quantity} ${event.giftName} · ₦${event.totalNaira}` }].slice(-6));
-          window.setTimeout(() => setEffects((items) => items.filter((item) => item.id !== event.id)), 5000);
+          callbacks.current.onGiftEvent?.(event);
+          const gift: LiveGiftEffect = { eventId: event.id, senderUsername: event.senderUsername, giftName: event.giftName, giftIcon: event.giftIcon, giftAnimationUrl: event.giftAnimationUrl, rarity: event.rarity, quantity: event.quantity, totalKobo: event.totalKobo, creatorEarnKobo: event.creatorEarnKobo };
+          setGiftQueue((items) => items.some((item) => item.eventId === gift.eventId) || activeGiftRef.current?.eventId === gift.eventId ? items : [...items.slice(-5), gift]);
         }
         if (event.type === "live.reaction") {
-          setEffects((items) => [...items, { id: event.id, emoji: event.emoji, kind: "reaction" }].slice(-12));
-          window.setTimeout(() => setEffects((items) => items.filter((item) => item.id !== event.id)), 3500);
+          callbacks.current.onReactionEvent?.(event);
+          setEffects((items) => [...items, { id: event.id, emoji: event.emoji }].slice(-12));
+          const timer = window.setTimeout(() => {
+            setEffects((items) => items.filter((item) => item.id !== event.id));
+            effectTimers.current.delete(event.id);
+          }, 3500);
+          effectTimers.current.set(event.id, timer);
         }
+        if (event.type === "live.goal.update" || event.type === "live.goal.complete") callbacks.current.onGoalEvent?.(event);
+        if (event.type === "live.leaderboard.update") callbacks.current.onLeaderboardEvent?.(event);
       } catch { /* Ignore malformed room data. */ }
     };
+    const reconnected = () => callbacks.current.onReconnect?.();
     room.on(RoomEvent.DataReceived, receive);
-    return () => { room.off(RoomEvent.DataReceived, receive); };
-  }, [room, onChatMessage, onGiftEvent, onChatModeration]);
+    room.on(RoomEvent.Reconnected, reconnected);
+    return () => {
+      room.off(RoomEvent.DataReceived, receive);
+      room.off(RoomEvent.Reconnected, reconnected);
+      effectTimers.current.forEach((timer) => window.clearTimeout(timer));
+      effectTimers.current.clear();
+    };
+  }, [room]);
   const localParticipant =
     useLocalParticipant();
 
@@ -240,6 +289,7 @@ function LiveVideoSurface({
 
   const localId =
     localParticipant.localParticipant.identity;
+  const creatorAudioAvailable = participants.some((participant) => participant.identity !== localId && Array.from(participant.audioTrackPublications.values() as Iterable<{ isMuted: boolean }>).some((publication) => !publication.isMuted));
 
   const localCamera = cameraTracks.find(
     (ref) =>
@@ -291,10 +341,9 @@ function LiveVideoSurface({
   return (
     <div className="relative aspect-video overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden" aria-live="polite">
-        {effects.map((effect) => <div key={effect.id} className={`absolute bottom-16 ${effect.kind === "gift" ? "left-1/2 -translate-x-1/2 rounded-2xl border border-amber-300/40 bg-black/70 px-5 py-3 text-center text-amber-100 shadow-2xl" : "left-[72%] text-4xl"} animate-[six20-float_3.5s_ease-out_forwards]`}>
-          <span className="text-4xl">{effect.emoji}</span>{effect.text && <div className="mt-1 text-sm font-black">{effect.text}</div>}
-        </div>)}
+        {effects.map((effect) => <div key={effect.id} className="absolute bottom-16 left-[72%] animate-[six20-float_3.5s_ease-out_forwards] text-4xl">{effect.emoji}</div>)}
       </div>
+      <GiftOverlay gift={activeGift} isCreator={isCreator} onComplete={clearActiveGift} />
       {mainCamera ? (
         <VideoTrack
           trackRef={mainCamera}
@@ -349,6 +398,9 @@ function LiveVideoSurface({
           <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-black/35 px-2.5 py-1 text-[11px] font-bold text-white/80 backdrop-blur">
             <Wifi size={12} />
             {connectionText}
+          </span>
+          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black backdrop-blur ${isCreator ? (localParticipant.isMicrophoneEnabled ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-amber-300/20 bg-amber-300/10 text-amber-100") : (creatorAudioAvailable ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : "border-white/10 bg-black/35 text-white/60")}`}>
+            {isCreator ? (localParticipant.isMicrophoneEnabled ? "MIC ON" : "MIC MUTED") : (creatorAudioAvailable ? "LIVE AUDIO" : "WAITING FOR AUDIO")}
           </span>
         </div>
 
@@ -422,6 +474,11 @@ export default function LiveKitStage({
   onChatMessage,
   onGiftEvent,
   onChatModeration,
+  onGoalEvent,
+  onLeaderboardEvent,
+  onReactionEvent,
+  onRealtimeEvent,
+  onReconnect,
 }: LiveKitStageProps) {
   const [token, setToken] =
     useState<string | null>(null);
@@ -627,6 +684,11 @@ export default function LiveKitStage({
           onChatMessage={onChatMessage}
           onGiftEvent={onGiftEvent}
           onChatModeration={onChatModeration}
+          onGoalEvent={onGoalEvent}
+          onLeaderboardEvent={onLeaderboardEvent}
+          onReactionEvent={onReactionEvent}
+          onRealtimeEvent={onRealtimeEvent}
+          onReconnect={onReconnect}
         />
       </LiveKitRoom>
     </div>

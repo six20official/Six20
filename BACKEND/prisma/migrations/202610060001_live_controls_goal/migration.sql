@@ -1,8 +1,0 @@
-﻿ALTER TABLE "LiveSession" ADD COLUMN "chatEnabled" BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "LiveSession" ADD COLUMN "reactionsEnabled" BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "LiveSession" ADD COLUMN "giftsEnabled" BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "LiveSession" ADD COLUMN "goalTitle" TEXT;
-ALTER TABLE "LiveSession" ADD COLUMN "goalTargetKobo" INTEGER;
-ALTER TABLE "LiveUserBlock" ADD COLUMN "isBanned" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "LiveUserBlock" ADD COLUMN "mutedUntil" DATETIME;
-ALTER TABLE "LiveUserBlock" ADD COLUMN "removedUntil" DATETIME;

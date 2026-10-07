@@ -4,3 +4,13 @@ dist
 uploads
 prisma/*.db
 prisma/*.db-journal
+prisma/dev.db
+prisma/dev.db-*
+prisma/*.db.backup*
+prisma/migration-repair/
+prisma/migrations-archive/
+
+# Local SIX20 database backups
+prisma/dev.db.*
+# Temporary PostgreSQL schema
+prisma/schema.postgres.prisma

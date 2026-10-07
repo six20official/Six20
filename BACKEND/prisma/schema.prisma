@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -26,23 +26,25 @@ model User {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   affiliateProfile    AffiliateProfile?
+  bankAccounts        BankAccount[]
   comments            Comment[]
   conversationMembers ConversationMember[]
   creatorProfile      CreatorProfile?
-  followers           Follow[]             @relation("Followers")
   following           Follow[]             @relation("Following")
+  followers           Follow[]             @relation("Followers")
   gameScores          GameScore[]
   receivedGifts       GiftTransaction[]    @relation("ReceivedGifts")
   sentGifts           GiftTransaction[]    @relation("SentGifts")
   likes               Like[]
-  liveSessions        LiveSession[]
   liveChatMessages    LiveChatMessage[]
-  liveViewers         LiveViewer[]
+  liveSessions        LiveSession[]
   liveBlocks          LiveUserBlock[]
+  liveViewers         LiveViewer[]
   receivedMessages    Message[]            @relation("ReceivedMessages")
   sentMessages        Message[]            @relation("SentMessages")
   notifications       Notification[]
   orders              Order[]
+  paymentTransactions PaymentTransaction[]
   productReviews      ProductReview[]
   securityEvents      SecurityEvent[]
   securitySessions    SecuritySession[]
@@ -51,11 +53,9 @@ model User {
   videos              Video[]
   wallet              Wallet?
   walletTransactions  WalletTransaction[]
-  paymentTransactions PaymentTransaction[]
-  bankAccounts        BankAccount[]
-  withdrawals         Withdrawal[]
-  sentTransfers       WalletTransfer[]     @relation("SentTransfers")
   receivedTransfers   WalletTransfer[]     @relation("ReceivedTransfers")
+  sentTransfers       WalletTransfer[]     @relation("SentTransfers")
+  withdrawals         Withdrawal[]
 }
 
 model CreatorProfile {
@@ -95,8 +95,8 @@ model Like {
   userId    Int
   videoId   Int
   createdAt DateTime @default(now())
-  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([videoId, userId])
 }
@@ -117,8 +117,8 @@ model Follow {
   followerId  Int
   followingId Int
   createdAt   DateTime @default(now())
-  following   User     @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
   follower    User     @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
 }
@@ -150,8 +150,8 @@ model ConversationMember {
   userId         Int
   joinedAt       DateTime     @default(now())
   isAdmin        Boolean      @default(false)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([conversationId, userId])
 }
@@ -194,14 +194,14 @@ model LiveSession {
   startedAt        DateTime?
   endedAt          DateTime?
   createdAt        DateTime          @default(now())
-  creator          User              @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  viewers          LiveViewer[]
-  chatMessages     LiveChatMessage[]
-  userBlocks       LiveUserBlock[]
   battlesAsA       LiveBattle[]      @relation("BattleSessionA")
   battlesAsB       LiveBattle[]      @relation("BattleSessionB")
+  chatMessages     LiveChatMessage[]
   playGames        LivePlayGame[]
   polls            LivePoll[]
+  creator          User              @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  userBlocks       LiveUserBlock[]
+  viewers          LiveViewer[]
 }
 
 model LiveBattle {
@@ -271,18 +271,16 @@ model LivePollVote {
 }
 
 model LiveViewer {
-  id            Int       @id @default(autoincrement())
+  id            Int         @id @default(autoincrement())
   liveSessionId Int
   userId        Int
-  joinedAt      DateTime  @default(now())
-  lastSeenAt    DateTime  @default(dbgenerated("'1970-01-01T00:00:00.000Z'"))
+  joinedAt      DateTime    @default(now())
+  lastSeenAt    DateTime    @default(dbgenerated("'1970-01-01 00:00:00'::timestamp without time zone"))
   mutedUntil    DateTime?
-
-  stageRole   String @default("audience")
-  stageStatus String @default("none")
-
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  stageRole     String      @default("audience")
+  stageStatus   String      @default("none")
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([liveSessionId, userId])
   @@index([liveSessionId, lastSeenAt])
@@ -290,31 +288,30 @@ model LiveViewer {
 }
 
 model Gift {
-  id            Int       @id @default(autoincrement())
+  id            Int               @id @default(autoincrement())
   name          String
-  slug          String    @unique
+  slug          String            @unique
   description   String?
   category      String
   imageUrl      String?
   thumbnailUrl  String?
   animationUrl  String?
   priceCoins    Int
-  priceKobo     BigInt    @default(0)
-  rarity        String    @default("common")
-  sortOrder     Int       @default(0)
-  isFeatured    Boolean   @default(false)
+  priceKobo     BigInt            @default(0)
+  rarity        String            @default("common")
+  sortOrder     Int               @default(0)
+  isFeatured    Boolean           @default(false)
   brand         String?
   team          String?
   sport         String?
   country       String?
-  licenseStatus String    @default("ORIGINAL_FAN")
+  licenseStatus String            @default("ORIGINAL_FAN")
   licenseExpiry DateTime?
   assetSource   String?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  transactions GiftTransaction[]
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  transactions  GiftTransaction[]
 
   @@index([category])
   @@index([priceCoins])
@@ -430,8 +427,8 @@ model Withdrawal {
   failureReason        String?
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
+  bankAccount          BankAccount @relation(fields: [bankAccountId], references: [id])
   user                 User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  bankAccount          BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
 
   @@index([userId, createdAt])
   @@index([status])
@@ -445,8 +442,8 @@ model WalletTransfer {
   reference  String   @unique
   status     String   @default("completed")
   createdAt  DateTime @default(now())
-  sender     User     @relation("SentTransfers", fields: [senderId], references: [id], onDelete: Cascade)
   receiver   User     @relation("ReceivedTransfers", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender     User     @relation("SentTransfers", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([senderId, createdAt])
   @@index([receiverId, createdAt])
@@ -495,8 +492,8 @@ model ProductReview {
   rating    Int
   comment   String?
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([productId, userId])
 }
@@ -511,8 +508,8 @@ model Order {
   phone     String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
-  store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
   buyer     User        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
   items     OrderItem[]
 
   @@index([buyerId])
@@ -526,8 +523,8 @@ model OrderItem {
   productId Int
   quantity  Int
   price     Int
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([productId])
@@ -615,8 +612,8 @@ model GameScore {
   userId    Int
   score     Int
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([gameId])
   @@index([userId])
@@ -656,16 +653,15 @@ model SecurityEvent {
 }
 
 model LiveChatMessage {
-  id            Int       @id @default(autoincrement())
+  id            Int         @id @default(autoincrement())
   liveSessionId Int
   userId        Int
   text          String
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime    @default(now())
   deletedAt     DateTime?
-  isPinned      Boolean   @default(false)
-
-  liveSession LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPinned      Boolean     @default(false)
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([liveSessionId, createdAt])
   @@index([userId, createdAt])

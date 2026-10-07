@@ -14,3 +14,10 @@ prisma/migrations-archive/
 prisma/dev.db.*
 # Temporary PostgreSQL schema
 prisma/schema.postgres.prisma
+
+# Local development/agent artifacts
+.agents/
+skills-lock.json
+../ersUSERDesktopsix20
+
+ersUSERDesktopsix20

@@ -291,15 +291,35 @@ function LiveVideoSurface({
     localParticipant.localParticipant.identity;
   const creatorAudioAvailable = participants.some((participant) => participant.identity !== localId && Array.from(participant.audioTrackPublications.values() as Iterable<{ isMuted: boolean }>).some((publication) => !publication.isMuted));
 
-  const stageCameraTracks = cameraTracks
-    .filter((ref) => !!ref.participant)
-    .slice(0, 12) as TrackReference[];
+  const localCamera = cameraTracks.find(
+    (ref) =>
+      ref.participant.identity === localId,
+  ) as TrackReference | undefined;
 
-  const screenTrack =
+  const remoteCamera = cameraTracks.find(
+    (ref) =>
+      ref.participant.identity !== localId,
+  ) as TrackReference | undefined;
+
+  const mainCamera =
+    isCreator && localCamera
+      ? localCamera
+      : remoteCamera ?? localCamera;
+
+  const remoteScreen =
     screenTracks.find(
       (ref) =>
         ref.participant.identity !== localId,
     ) as TrackReference | undefined;
+
+  const localScreen =
+    screenTracks.find(
+      (ref) =>
+        ref.participant.identity === localId,
+    ) as TrackReference | undefined;
+
+  const screenTrack =
+    remoteScreen ?? localScreen;
 
   const connectionText =
     connectionState ===
@@ -313,8 +333,6 @@ function LiveVideoSurface({
           ? "Disconnected"
           : "Connecting";
 
-  const connectedStageParticipants = Math.min(stageCameraTracks.length, 12);
-
   const connectedAudience = Math.max(
     0,
     participants.length - 1,
@@ -326,65 +344,11 @@ function LiveVideoSurface({
         {effects.map((effect) => <div key={effect.id} className="absolute bottom-16 left-[72%] animate-[six20-float_3.5s_ease-out_forwards] text-4xl">{effect.emoji}</div>)}
       </div>
       <GiftOverlay gift={activeGift} isCreator={isCreator} onComplete={clearActiveGift} />
-      {stageCameraTracks.length > 0 ? (
-        <div
-          className={
-            "grid h-full w-full gap-1.5 bg-[#050509] p-1.5 " +
-            (stageCameraTracks.length === 1
-              ? "grid-cols-1"
-              : stageCameraTracks.length === 2
-                ? "grid-cols-2"
-                : stageCameraTracks.length <= 4
-                  ? "grid-cols-2"
-                  : stageCameraTracks.length <= 6
-                    ? "grid-cols-2 sm:grid-cols-3"
-                    : stageCameraTracks.length <= 9
-                      ? "grid-cols-3"
-                      : "grid-cols-3 sm:grid-cols-4")
-          }
-        >
-          {stageCameraTracks.map((trackRef, index) => {
-            const participant = trackRef.participant;
-            const isLocal = participant.identity === localId;
-            const displayName =
-              participant.name ||
-              participant.identity.replace(/^user-/, "User");
-
-            return (
-              <div
-                key={`${participant.identity}-${trackRef.source}-${index}`}
-                className="relative min-h-0 overflow-hidden rounded-xl border border-white/10 bg-[#11111a]"
-              >
-                <VideoTrack
-                  trackRef={trackRef}
-                  className="h-full w-full object-cover"
-                />
-
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8">
-                  <div className="flex items-center gap-1.5">
-                    <span className="max-w-[75%] truncate text-[11px] font-black text-white">
-                      {displayName}
-                    </span>
-
-                    {isLocal && (
-                      <span className="rounded-full bg-violet-500 px-1.5 py-0.5 text-[8px] font-black text-white">
-                        HOST
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {!participant.isCameraEnabled && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-[#171322]">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-sm font-black text-white">
-                      {displayName.slice(0, 1).toUpperCase()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+      {mainCamera ? (
+        <VideoTrack
+          trackRef={mainCamera}
+          className="h-full w-full object-cover"
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_50%_30%,rgba(168,85,247,0.35),transparent_35%),linear-gradient(135deg,#190b2e,#10102d,#05050d)]">
           <div className="text-center text-white">
@@ -395,13 +359,13 @@ function LiveVideoSurface({
             <div className="text-lg font-black">
               {isCreator
                 ? "Starting your camera..."
-                : "Waiting for the stage"}
+                : "Waiting for the creator"}
             </div>
 
             <div className="mt-2 text-sm text-white/45">
               {isCreator
                 ? "Allow camera and microphone access."
-                : "The host or guests will appear here."}
+                : "The creator video will appear here."}
             </div>
           </div>
         </div>
@@ -415,7 +379,9 @@ function LiveVideoSurface({
           />
 
           <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-1 text-[10px] font-black">
-            {screenTrack.participant.identity !== localId ? "REMOTE SCREEN" : "SCREEN"}
+            {remoteScreen
+              ? "REMOTE SCREEN"
+              : "SCREEN"}
           </div>
         </div>
       )}
@@ -440,7 +406,7 @@ function LiveVideoSurface({
 
         <div className="flex items-center gap-1 rounded-full border border-white/10 bg-black/35 px-3 py-1 text-[11px] font-bold backdrop-blur">
           <Users size={13} />
-          {connectedStageParticipants} on stage
+          {connectedAudience} connected
         </div>
       </div>
 
@@ -521,7 +487,7 @@ export default function LiveKitStage({
     useState<string | null>(null);
 
   const [role, setRole] = useState<
-    "creator" | "guest" | "viewer" | null
+    "creator" | "viewer" | null
   >(null);
 
   const [error, setError] =
@@ -683,8 +649,8 @@ export default function LiveKitStage({
         token={token}
         serverUrl={serverUrl}
         connect={true}
-        audio={role === "creator" || role === "guest"}
-        video={role === "creator" || role === "guest"}
+        audio={role === "creator"}
+        video={role === "creator"}
         className="w-full"
         onError={(roomError) => {
           console.error(
@@ -728,5 +694,3 @@ export default function LiveKitStage({
     </div>
   );
 }
-
-

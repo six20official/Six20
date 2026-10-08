@@ -15,6 +15,7 @@ import rateLimit from "express-rate-limit";
 import { PrismaClient } from "@prisma/client";
 import { registerLiveProductionRoutes } from "./live-production";
 import { registerLiveInteractiveRoutes } from "./live-interactive";
+import { registerLiveStageRoutes } from "./live-stage";
 import { registerWalletRoutes } from "./wallet-routes";
 import { publishLiveEvent } from "./live-events";
 import { GIFT_CATALOG, GIFT_CATEGORIES } from "./gift-catalog";
@@ -3071,9 +3072,40 @@ app.get(
 
 // Wallet read endpoints are registered in wallet-routes.ts.
 
-registerLiveProductionRoutes(app, prisma, requireAuth);
-registerLiveInteractiveRoutes(app, prisma, requireAuth);
+registerLiveProductionRoutes(
+  app,
+  prisma,
+  requireAuth,
+);
+
+registerLiveInteractiveRoutes(
+  app,
+  prisma,
+  requireAuth,
+);
+
+registerLiveStageRoutes(
+  app,
+  prisma,
+  requireAuth,
+);
+
+// ======================================================
 // 404
+// ======================================================
+
+app.use(
+  (
+    _req: Request,
+    res: Response
+  ) => {
+    return res.status(404).json({
+      success: false,
+      error:
+        "Route not found",
+    });
+  }
+);
 // ======================================================
 
 app.use(

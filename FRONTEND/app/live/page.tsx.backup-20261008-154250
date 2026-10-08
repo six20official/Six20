@@ -913,18 +913,16 @@ export default function LivePage() {
                 </div>
                 <div className="mt-4 flex flex-wrap gap-2">
                   {joined && !isHost && (
-  <button
-    type="button"
-    onClick={() => setShowGiftBox(true)}
-    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 to-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:scale-[1.02]"
-  >
-    <Gift className="h-4 w-4" />
-    Gift Universe
-  </button>
-)}
-
-{(joined || isHost) && (
   <>
+    <button
+      type="button"
+      onClick={() => setShowGiftBox(true)}
+      className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 to-violet-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:scale-[1.02]"
+    >
+      <Gift className="h-4 w-4" />
+      Gift Universe
+    </button>
+
     <button
       type="button"
       onClick={() => setShowPlay(true)}

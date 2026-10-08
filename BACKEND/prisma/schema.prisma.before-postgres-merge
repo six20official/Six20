@@ -1,0 +1,503 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+
+
+
+
+
+
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  Int                  @id @default(autoincrement())
+  username            String               @unique
+  email               String               @unique
+  passwordHash        String
+  displayName         String
+  avatarUrl           String?
+  bio                 String?
+  phone               String?
+  isVerified          Boolean              @default(false)
+  isCreator           Boolean              @default(false)
+  isSeller            Boolean              @default(false)
+  isAffiliate         Boolean              @default(false)
+  isAdmin             Boolean              @default(false)
+  isBlocked           Boolean              @default(false)
+  creatorLevel        Int                  @default(0)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  affiliateProfile    AffiliateProfile?
+  comments            Comment[]
+  conversationMembers ConversationMember[]
+  creatorProfile      CreatorProfile?
+  followers           Follow[]             @relation("Followers")
+  following           Follow[]             @relation("Following")
+  gameScores          GameScore[]
+  receivedGifts       GiftTransaction[]    @relation("ReceivedGifts")
+  sentGifts           GiftTransaction[]    @relation("SentGifts")
+  likes               Like[]
+  liveSessions        LiveSession[]
+  liveChatMessages LiveChatMessage[]
+  liveViewers         LiveViewer[]
+  receivedMessages    Message[]            @relation("ReceivedMessages")
+  sentMessages        Message[]            @relation("SentMessages")
+  notifications       Notification[]
+  orders              Order[]
+  productReviews      ProductReview[]
+  securityEvents      SecurityEvent[]
+  securitySessions    SecuritySession[]
+  sellerRatings       SellerRating[]       @relation("BuyerRatings")
+  store               Store?
+  videos              Video[]
+  wallet              Wallet?
+  walletTransactions  WalletTransaction[]
+}
+
+model CreatorProfile {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @unique
+  category   String?
+  country    String   @default("Nigeria")
+  state      String?
+  city       String?
+  website    String?
+  totalViews Int      @default(0)
+  totalLikes Int      @default(0)
+  totalGifts Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Video {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  videoUrl   String
+  caption    String?
+  soundTitle String?
+  views      Int       @default(0)
+  shares     Int       @default(0)
+  isPublic   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  comments   Comment[]
+  likes      Like[]
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Like {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  videoId   Int
+  createdAt DateTime @default(now())
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([videoId, userId])
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  videoId   Int
+  userId    Int
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
+model Follow {
+  id          Int      @id @default(autoincrement())
+  followerId  Int
+  followingId Int
+  createdAt   DateTime @default(now())
+  following   User     @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
+  follower    User     @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Conversation {
+  id        Int                  @id @default(autoincrement())
+  title     String?
+  isGroup   Boolean              @default(false)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  members   ConversationMember[]
+  messages  Message[]
+}
+
+model ConversationMember {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  userId         Int
+  joinedAt       DateTime     @default(now())
+  isAdmin        Boolean      @default(false)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+}
+
+model Message {
+  id             Int           @id @default(autoincrement())
+  senderId       Int
+  receiverId     Int
+  conversationId Int?
+  text           String?
+  messageType    String        @default("text")
+  mediaUrl       String?
+  isRead         Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  receiver       User          @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender         User          @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model LiveSession {
+  id          Int          @id @default(autoincrement())
+  creatorId   Int
+  title       String
+  description String?
+  streamKey   String?
+  status      String       @default("scheduled")
+  viewerCount Int          @default(0)
+  likes       Int          @default(0)
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime     @default(now())
+  creator     User         @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  viewers     LiveViewer[]
+  chatMessages LiveChatMessage[]
+}
+
+model LiveViewer {
+  id            Int      @id @default(autoincrement())
+  liveSessionId Int
+  userId        Int
+  joinedAt      DateTime @default(now())
+  lastSeenAt    DateTime @default(dbgenerated("'1970-01-01T00:00:00.000Z'"))
+  mutedUntil    DateTime?
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+
+  stageRole     String   @default("audience")
+  stageStatus   String   @default("none")
+
+  @@unique([liveSessionId, userId])
+  @@index([liveSessionId, lastSeenAt])
+  @@index([liveSessionId, stageRole, stageStatus])
+}
+
+model Gift {
+  id            Int      @id @default(autoincrement())
+  name          String
+  slug          String   @unique
+  description   String?
+  category      String
+  imageUrl      String?
+  thumbnailUrl  String?
+  animationUrl  String?
+  priceCoins    Int
+  rarity        String   @default("common")
+  sortOrder     Int      @default(0)
+  isFeatured    Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  transactions GiftTransaction[]
+
+  @@index([category])
+  @@index([priceCoins])
+  @@index([rarity])
+  @@index([isActive])
+  @@index([isFeatured])
+}
+
+model GiftTransaction {
+  id            Int      @id @default(autoincrement())
+  senderId      Int
+  receiverId    Int
+  giftId        Int
+  quantity      Int      @default(1)
+  totalCoins    Int
+  creatorEarn   Int
+  platformEarn  Int
+  liveSessionId Int?
+  createdAt     DateTime @default(now())
+  gift          Gift     @relation(fields: [giftId], references: [id], onDelete: Cascade)
+  receiver      User     @relation("ReceivedGifts", fields: [receiverId], references: [id], onDelete: Cascade)
+  sender        User     @relation("SentGifts", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([giftId])
+  @@index([liveSessionId])
+}
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  coins     Int      @default(0)
+  balance   Int      @default(0)
+  earnings  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WalletTransaction {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  type        String
+  amount      Int
+  description String?
+  reference   String?
+  status      String   @default("completed")
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Store {
+  id          Int            @id @default(autoincrement())
+  sellerId    Int            @unique
+  name        String
+  description String?
+  logoUrl     String?
+  location    String?
+  isVerified  Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  orders      Order[]
+  products    Product[]
+  ratings     SellerRating[]
+  seller      User           @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id          Int             @id @default(autoincrement())
+  storeId     Int
+  name        String
+  description String?
+  price       Int
+  stock       Int             @default(0)
+  imageUrl    String?
+  category    String?
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  orderItems  OrderItem[]
+  store       Store           @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  reviews     ProductReview[]
+
+  @@index([storeId])
+  @@index([category])
+}
+
+model ProductReview {
+  id        Int      @id @default(autoincrement())
+  productId Int
+  userId    Int
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, userId])
+}
+
+model Order {
+  id        Int         @id @default(autoincrement())
+  buyerId   Int
+  storeId   Int
+  total     Int
+  status    String      @default("pending")
+  address   String?
+  phone     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  store     Store       @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  buyer     User        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  items     OrderItem[]
+
+  @@index([buyerId])
+  @@index([storeId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  quantity  Int
+  price     Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model SellerRating {
+  id        Int      @id @default(autoincrement())
+  storeId   Int
+  buyerId   Int
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+  buyer     User     @relation("BuyerRatings", fields: [buyerId], references: [id], onDelete: Cascade)
+  store     Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, buyerId])
+}
+
+model AffiliateProfile {
+  id             Int                   @id @default(autoincrement())
+  userId         Int                   @unique
+  commissionRate Int                   @default(20)
+  totalClicks    Int                   @default(0)
+  totalSales     Int                   @default(0)
+  totalEarned    Int                   @default(0)
+  available      Int                   @default(0)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  clicks         AffiliateClick[]
+  commissions    AffiliateCommission[]
+  links          AffiliateLink[]
+  user           User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AffiliateLink {
+  id          Int              @id @default(autoincrement())
+  affiliateId Int
+  code        String           @unique
+  productId   Int?
+  clicks      Int              @default(0)
+  sales       Int              @default(0)
+  createdAt   DateTime         @default(now())
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model AffiliateClick {
+  id          Int              @id @default(autoincrement())
+  affiliateId Int
+  linkId      Int
+  createdAt   DateTime         @default(now())
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  @@index([linkId])
+}
+
+model AffiliateCommission {
+  id          Int              @id @default(autoincrement())
+  affiliateId Int
+  amount      Int
+  orderId     Int?
+  status      String           @default("pending")
+  createdAt   DateTime         @default(now())
+  affiliate   AffiliateProfile @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+}
+
+model Game {
+  id          Int         @id @default(autoincrement())
+  name        String
+  slug        String      @unique
+  description String?
+  imageUrl    String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  scores      GameScore[]
+}
+
+model GameScore {
+  id        Int      @id @default(autoincrement())
+  gameId    Int
+  userId    Int
+  score     Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+
+  @@index([gameId])
+  @@index([userId])
+}
+
+model SecuritySession {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  tokenHash  String
+  device     String?
+  ipAddress  String?
+  userAgent  String?
+  lastActive DateTime @default(now())
+  expiresAt  DateTime
+  isRevoked  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@index([expiresAt])
+}
+
+model SecurityEvent {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  type      String
+  ipAddress String?
+  userAgent String?
+  details   String?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model LiveChatMessage {
+  id            Int         @id @default(autoincrement())
+  liveSessionId Int
+  userId        Int
+  text          String
+  createdAt     DateTime    @default(now())
+
+  liveSession   LiveSession @relation(fields: [liveSessionId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([liveSessionId, createdAt])
+  @@index([userId, createdAt])
+}
+

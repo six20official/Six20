@@ -5,13 +5,19 @@ export const dynamic = "force-dynamic";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
+type RouteContext = {
+  params: Promise<{ id: string }>;
+};
+
 export async function GET(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: RouteContext
 ) {
   try {
+    const { id } = await params;
+
     const response = await fetch(
-      `${API_URL}/api/users/${params.id}`,
+      `${API_URL}/api/users/${encodeURIComponent(id)}`,
       {
         method: "GET",
         headers: {
@@ -41,13 +47,16 @@ export async function GET(
 
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } }
+  { params }: RouteContext
 ) {
   try {
-    const authorization = req.headers.get("authorization") || "";
+    const { id } = await params;
+
+    const authorization =
+      req.headers.get("authorization") || "";
 
     const response = await fetch(
-      `${API_URL}/api/users/${params.id}/follow`,
+      `${API_URL}/api/users/${encodeURIComponent(id)}/follow`,
       {
         method: "POST",
         headers: {

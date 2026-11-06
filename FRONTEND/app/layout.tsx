@@ -1,9 +1,9 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SIX20",
-  description: "Entertainment. Live. Games. Social. Rewards.",
+  title: "SIX20 — Universal Entertainment",
+  description: "Discover videos, creators, LIVE entertainment, games, music and community on SIX20.",
 };
 
 export default function RootLayout({

@@ -1,4 +1,4 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 import type { Express, Request, Response, NextFunction } from "express";
 import type { PrismaClient } from "@prisma/client";
 import rateLimit from "express-rate-limit";
@@ -13,6 +13,7 @@ class PaystackRequestError extends Error {
   constructor(readonly statusCode: number | undefined, message = "Paystack request failed") { super(message); }
 }
 async function ps(config: PaystackRuntimeConfig, path: string, init: RequestInit = {}) {
+  if (!config.enabled) throw new PaystackRequestError(undefined, "Paystack is not configured");
   const response = await fetch(`${paystack}${path}`, {
     ...init,
     signal: init.signal || AbortSignal.timeout(12_000),
@@ -31,6 +32,7 @@ async function bestEffortLiveBroadcast(sessionId: number, event: string, payload
 }
 export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: Auth, config: PaystackRuntimeConfig) {
   app.post("/api/payments/paystack/webhook", async (req: Request, res: Response) => {
+    if (!config.enabled) return res.sendStatus(503);
     const signature = req.headers["x-paystack-signature"];
     const raw = (req as Request & { rawBody?: Buffer }).rawBody;
     if (!raw || typeof signature !== "string" || !verifyPaystackSignature(raw, signature, config.secretKey)) return res.sendStatus(401);
@@ -75,9 +77,10 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
     res.json({ success: true, wallet: { availableKobo: wallet.availableKobo, earningsKobo: wallet.earningsKobo, pendingKobo: wallet.pendingKobo }, giftStats: { totalGiftNaira: formatNairaFromKobo(stats._sum.totalKobo || 0n), creatorEarningsNaira: formatNairaFromKobo(stats._sum.creatorEarnKobo || 0n) } });
   });
   app.post("/api/wallet/fund", limit, auth, async (req: Request, res: Response) => {
+    if (!config.enabled) return res.status(503).json({ message: "Paystack is not configured yet" });
     const userId = id(req), amountKobo = parseNairaToKobo(req.body?.amountNaira);
     if (!Number.isSafeInteger(userId) || userId < 1) return res.sendStatus(401);
-    if (!amountKobo || amountKobo < 10_000n) return res.status(400).json({ message: "Minimum funding amount is ₦100" });
+    if (!amountKobo || amountKobo < 10_000n) return res.status(400).json({ message: "Minimum funding amount is â‚¦100" });
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     if (!user) return res.sendStatus(401);
     const reference = ref("six20_fund");
@@ -98,6 +101,7 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
     }
   });
   app.post("/api/wallet/fund/verify", limit, auth, async (req: Request, res: Response) => {
+    if (!config.enabled) return res.status(503).json({ message: "Paystack is not configured yet" });
     try {
       const reference = String(req.body?.reference || "");
       const payment = await prisma.paymentTransaction.findUnique({ where: { reference } });
@@ -217,6 +221,7 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
     }
   });
   app.get("/api/wallet/banks", auth, async (_req: Request, res: Response) => {
+    if (!config.enabled) return res.status(503).json({ message: "Paystack is not configured yet" });
     try { res.json({ success: true, banks: await ps(config, "/bank?country=nigeria&perPage=100") }); }
     catch (e) { res.status(502).json({ message: e instanceof Error ? e.message : "Could not load banks" }); }
   });
@@ -225,6 +230,7 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
     res.json({ success: true, accounts });
   });
   app.post("/api/wallet/bank-account", limit, auth, async (req: Request, res: Response) => {
+    if (!config.enabled) return res.status(503).json({ message: "Paystack is not configured yet" });
     try {
       const bankCode = String(req.body?.bankCode || ""), accountNumber = String(req.body?.accountNumber || "");
       if (!/^\d{10}$/.test(accountNumber) || !bankCode) return res.status(400).json({ message: "Enter a valid 10 digit account number and bank" });
@@ -237,8 +243,9 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
     } catch (e) { res.status(502).json({ message: e instanceof Error ? e.message : "Account verification failed" }); }
   });
   app.post("/api/wallet/withdraw", limit, auth, async (req: Request, res: Response) => {
+    if (!config.enabled) return res.status(503).json({ message: "Paystack is not configured yet" });
     const userId = id(req), amountKobo = parseNairaToKobo(req.body?.amountNaira), bankAccountId = String(req.body?.bankAccountId || "");
-    if (!amountKobo || amountKobo < 5000n) return res.status(400).json({ message: "Minimum withdrawal amount is ₦50" });
+    if (!amountKobo || amountKobo < 5000n) return res.status(400).json({ message: "Minimum withdrawal amount is â‚¦50" });
     const account = await prisma.bankAccount.findFirst({ where: { id: bankAccountId, userId } });
     if (!account) return res.status(404).json({ message: "Saved bank account not found" });
     const reference = ref("six20_withdrawal");
@@ -247,7 +254,7 @@ export function registerWalletRoutes(app: Express, prisma: PrismaClient, auth: A
         const debit = await tx.wallet.updateMany({ where: { userId, availableKobo: { gte: amountKobo } }, data: { availableKobo: { decrement: amountKobo }, pendingKobo: { increment: amountKobo } } });
         if (debit.count !== 1) throw new Error("INSUFFICIENT");
         const row = await tx.withdrawal.create({ data: { userId, bankAccountId, amountKobo, feeKobo: 0n, netKobo: amountKobo, reference, recipientCode: account.recipientCode } });
-        await tx.walletTransaction.create({ data: { userId, type: "withdrawal", amount: 0, amountKobo: -amountKobo, reference, providerReference: reference, idempotencyKey: `withdraw:${reference}`, status: "pending", description: `Withdrawal to ${account.bankName} ••••${account.accountLast4}` } });
+        await tx.walletTransaction.create({ data: { userId, type: "withdrawal", amount: 0, amountKobo: -amountKobo, reference, providerReference: reference, idempotencyKey: `withdraw:${reference}`, status: "pending", description: `Withdrawal to ${account.bankName} â€¢â€¢â€¢â€¢${account.accountLast4}` } });
         return row;
       });
       const result = await ps(config, "/transfer", { method: "POST", body: JSON.stringify({ source: "balance", amount: Number(amountKobo), recipient: account.recipientCode, reference, currency: "NGN", reason: "SIX20 wallet withdrawal" }) });
@@ -281,3 +288,5 @@ async function settleWithdrawal(prisma: PrismaClient, reference: string, event: 
     await tx.walletTransaction.updateMany({ where: { idempotencyKey: `withdraw:${reference}` }, data: { status: status === "success" ? "completed" : status } });
   });
 }
+
+

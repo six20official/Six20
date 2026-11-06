@@ -1,10 +1,12 @@
-import crypto from "crypto";
+﻿import crypto from "crypto";
 
 export type PaystackMode = "test" | "live";
+
 export type PaystackRuntimeConfig = {
   mode: PaystackMode;
   secretKey: string;
   publicKey: string;
+  enabled: boolean;
   callbackUrl?: string;
 };
 
@@ -13,15 +15,39 @@ export function validatePaystackConfig(env: NodeJS.ProcessEnv): PaystackRuntimeC
   const mode: PaystackMode = production ? "live" : "test";
   const secretKey = env.PAYSTACK_SECRET_KEY?.trim() || "";
   const publicKey = env.PAYSTACK_PUBLIC_KEY?.trim() || "";
+
   const secretPrefix = mode === "live" ? "sk_live_" : "sk_test_";
   const publicPrefix = mode === "live" ? "pk_live_" : "pk_test_";
-  const secretValid = secretKey.length > 0 && secretKey.startsWith(secretPrefix);
-  const publicValid = publicKey.length > 0 && publicKey.startsWith(publicPrefix);
-  if (!secretValid || !publicValid) {
-    throw new Error(`Paystack ${mode} configuration requires matching valid ${mode} secret and public keys`);
+
+  if (!secretKey && !publicKey && !production) {
+    const callbackUrl = env.PAYSTACK_CALLBACK_URL?.trim();
+    return {
+      mode,
+      secretKey: "",
+      publicKey: "",
+      enabled: false,
+      ...(callbackUrl ? { callbackUrl } : {}),
+    };
   }
+
+  const secretValid = secretKey.startsWith(secretPrefix);
+  const publicValid = publicKey.startsWith(publicPrefix);
+
+  if (!secretValid || !publicValid) {
+    throw new Error(
+      `Paystack ${mode} configuration requires matching valid ${mode} secret and public keys`
+    );
+  }
+
   const callbackUrl = env.PAYSTACK_CALLBACK_URL?.trim();
-  return { mode, secretKey, publicKey, ...(callbackUrl ? { callbackUrl } : {}) };
+
+  return {
+    mode,
+    secretKey,
+    publicKey,
+    enabled: true,
+    ...(callbackUrl ? { callbackUrl } : {}),
+  };
 }
 
 export function verifyPaystackSignature(rawBody: Buffer, signature: string, secret: string): boolean {
@@ -43,7 +69,6 @@ export function parseNairaToKobo(value: unknown, maximumNaira = 10_000_000): big
 
 export function creatorShareKobo(totalKobo: bigint): bigint {
   if (totalKobo < 0n) throw new Error("Gift total cannot be negative");
-  // Floor to the nearest whole kobo; the platform receives the exact remainder.
   return (totalKobo * 70n) / 100n;
 }
 

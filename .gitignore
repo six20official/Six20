@@ -1,7 +1,17 @@
 node_modules/
 .next/
-.env
-.env.local
 dist/
+.env
+.env.*
+!.env.example
+!.env.local.example
+*.db*
 *.log
-node_modules/
+uploads/
+*.tsbuildinfo
+BACKEND/privacy-search-results.txt
+
+# SIX20 private files
+FRONTEND/env.local
+*.db*
+BACKEND/privacy-search-results.txt
